@@ -6,9 +6,14 @@ import (
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"fmt"
+	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
+
+// DefaultLeeway is the default time leeway used when validating
+// token temporal claims (exp, nbf, iat).
+const DefaultLeeway = 60 * time.Second
 
 // JWTClaims represents standard JWT claims with optional extra fields.
 type JWTClaims struct {
@@ -31,17 +36,23 @@ func (c JWTClaims) GetExpirationTime() (*jwt.NumericDate, error) {
 	if c.Expiry == 0 {
 		return nil, nil
 	}
-	return jwt.NewNumericDate(jwt.NumericDate{}.Add(0).Add(0)), nil
+	return jwt.NewNumericDate(time.Unix(c.Expiry, 0)), nil
 }
 
 // GetIssuedAt implements jwt.Claims.
 func (c JWTClaims) GetIssuedAt() (*jwt.NumericDate, error) {
-	return nil, nil
+	if c.IssuedAt == 0 {
+		return nil, nil
+	}
+	return jwt.NewNumericDate(time.Unix(c.IssuedAt, 0)), nil
 }
 
 // GetNotBefore implements jwt.Claims.
 func (c JWTClaims) GetNotBefore() (*jwt.NumericDate, error) {
-	return nil, nil
+	if c.NotBefore == 0 {
+		return nil, nil
+	}
+	return jwt.NewNumericDate(time.Unix(c.NotBefore, 0)), nil
 }
 
 // GetIssuer implements jwt.Claims.
@@ -206,14 +217,28 @@ func (s *JWTSigner) Sign(ctx context.Context, claims JWTClaims) (string, error) 
 	return signed, nil
 }
 
-// JWTVerifier verifies JWT signatures using an OAuthKeyring.
+// JWTVerifierOption configures a JWTVerifier.
+type JWTVerifierOption func(*JWTVerifier)
+
+// WithVerifierLeeway sets the time leeway for validating exp, nbf, and iat claims.
+// Default is DefaultLeeway (60s).
+func WithVerifierLeeway(d time.Duration) JWTVerifierOption {
+	return func(v *JWTVerifier) { v.leeway = d }
+}
+
+// JWTVerifier verifies JWT signatures and validates claims using an OAuthKeyring.
 type JWTVerifier struct {
 	keyring OAuthKeyring
+	leeway  time.Duration
 }
 
 // NewJWTVerifier creates a new JWTVerifier with the given public keyring.
-func NewJWTVerifier(keyring OAuthKeyring) *JWTVerifier {
-	return &JWTVerifier{keyring: keyring}
+func NewJWTVerifier(keyring OAuthKeyring, opts ...JWTVerifierOption) *JWTVerifier {
+	v := &JWTVerifier{keyring: keyring, leeway: DefaultLeeway}
+	for _, opt := range opts {
+		opt(v)
+	}
+	return v
 }
 
 // Verify parses and verifies a JWT, returning the claims.
@@ -246,12 +271,12 @@ func (v *JWTVerifier) Verify(ctx context.Context, tokenString string) (*JWTClaim
 		return nil, &InvalidTokenError{Message: fmt.Sprintf("failed to resolve key: %v", err)}
 	}
 
-	// Re-parse with verification
+	// Re-parse with signature verification and claims validation (exp, nbf, iat).
 	verifiedToken, err := jwt.Parse(tokenString, func(t *jwt.Token) (any, error) {
 		return publicKey, nil
-	}, jwt.WithoutClaimsValidation())
+	}, jwt.WithLeeway(v.leeway))
 	if err != nil {
-		return nil, &InvalidTokenError{Message: fmt.Sprintf("invalid signature: %v", err)}
+		return nil, &InvalidTokenError{Message: fmt.Sprintf("JWT verification failed: %v", err)}
 	}
 
 	verifiedClaims, ok := verifiedToken.Claims.(jwt.MapClaims)

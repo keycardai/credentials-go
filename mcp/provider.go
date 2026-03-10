@@ -261,11 +261,15 @@ func (p *AuthProvider) ExchangeTokens(ctx context.Context, subjectToken string, 
 
 	tokens := make(map[string]*oauth.TokenResponse)
 
+	// Resolve the token endpoint for credential assertion audience.
+	tokenEndpoint, _ := client.TokenEndpoint(ctx)
+
 	for _, resource := range resources {
 		var req *oauth.TokenExchangeRequest
 
 		if p.credential != nil {
-			req, err = p.credential.PrepareTokenExchangeRequest(ctx, subjectToken, resource, nil)
+			opts := &PrepareOptions{TokenEndpoint: tokenEndpoint}
+			req, err = p.credential.PrepareTokenExchangeRequest(ctx, subjectToken, resource, opts)
 			if err != nil {
 				ac.SetResourceError(resource, ErrorDetail{
 					Error:    fmt.Sprintf("Token exchange failed for %s: %v", resource, err),

@@ -85,6 +85,12 @@ func NewTokenExchangeClient(issuerURL string, opts ...TokenExchangeClientOption)
 	}
 }
 
+// TokenEndpoint returns the discovered token endpoint URL.
+// It triggers lazy metadata discovery if not already done.
+func (c *TokenExchangeClient) TokenEndpoint(ctx context.Context) (string, error) {
+	return c.getTokenEndpoint(ctx)
+}
+
 // ExchangeToken performs a token exchange request.
 func (c *TokenExchangeClient) ExchangeToken(ctx context.Context, req TokenExchangeRequest) (*TokenResponse, error) {
 	tokenEndpoint, err := c.getTokenEndpoint(ctx)

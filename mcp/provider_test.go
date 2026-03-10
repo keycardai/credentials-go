@@ -116,6 +116,63 @@ func TestAccessContext_SetTokenClearsError(t *testing.T) {
 	}
 }
 
+// capturingCredential captures PrepareOptions for test assertions.
+type capturingCredential struct {
+	capturedOpts *PrepareOptions
+}
+
+func (c *capturingCredential) Auth() *ClientAuth {
+	return &ClientAuth{ClientID: "test-client", ClientSecret: "test-secret"}
+}
+
+func (c *capturingCredential) PrepareTokenExchangeRequest(_ context.Context, subjectToken, resource string, opts *PrepareOptions) (*oauth.TokenExchangeRequest, error) {
+	c.capturedOpts = opts
+	return &oauth.TokenExchangeRequest{
+		SubjectToken:     subjectToken,
+		Resource:         resource,
+		SubjectTokenType: "urn:ietf:params:oauth:token-type:access_token",
+	}, nil
+}
+
+func TestAuthProvider_ExchangeTokens_PassesTokenEndpoint(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			json.NewEncoder(w).Encode(map[string]string{
+				"issuer":         "http://" + r.Host,
+				"token_endpoint": "http://" + r.Host + "/token",
+			})
+		case "/token":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "exchanged-token",
+				"token_type":   "bearer",
+			})
+		}
+	}))
+	defer tokenServer.Close()
+
+	cred := &capturingCredential{}
+	provider, err := NewAuthProvider(
+		WithZoneURL(tokenServer.URL),
+		WithApplicationCredential(cred),
+	)
+	if err != nil {
+		t.Fatalf("creating provider: %v", err)
+	}
+
+	provider.ExchangeTokens(context.Background(), "user-token", "https://api.github.com")
+
+	if cred.capturedOpts == nil {
+		t.Fatal("PrepareOptions was nil — TokenEndpoint not passed through")
+	}
+
+	expectedEndpoint := tokenServer.URL + "/token"
+	if cred.capturedOpts.TokenEndpoint != expectedEndpoint {
+		t.Errorf("TokenEndpoint: got %q, want %q", cred.capturedOpts.TokenEndpoint, expectedEndpoint)
+	}
+}
+
 func TestNewAuthProvider_RequiresZoneURL(t *testing.T) {
 	_, err := NewAuthProvider()
 	if err == nil {

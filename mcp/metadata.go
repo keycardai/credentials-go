@@ -24,6 +24,7 @@ type metadataConfig struct {
 	scopesSupported       []string
 	resourceName          string
 	resourceDocumentation string
+	httpClient            *http.Client
 }
 
 // WithIssuer sets the authorization server issuer URL.
@@ -46,12 +47,20 @@ func WithServiceDocumentationURL(docURL string) MetadataOption {
 	return func(cfg *metadataConfig) { cfg.resourceDocumentation = docURL }
 }
 
+// WithMetadataHTTPClient sets the HTTP client used to fetch upstream authorization server metadata.
+func WithMetadataHTTPClient(c *http.Client) MetadataOption {
+	return func(cfg *metadataConfig) { cfg.httpClient = c }
+}
+
 // AuthMetadataHandler returns an http.Handler that serves both
 // /.well-known/oauth-protected-resource and /.well-known/oauth-authorization-server endpoints.
 func AuthMetadataHandler(opts ...MetadataOption) http.Handler {
 	cfg := metadataConfig{}
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+	if cfg.httpClient == nil {
+		cfg.httpClient = http.DefaultClient
 	}
 
 	mux := http.NewServeMux()
@@ -94,12 +103,24 @@ func AuthMetadataHandler(opts ...MetadataOption) http.Handler {
 
 			// Fetch upstream authorization server metadata
 			issuerMetadataURL := cfg.issuer + "/.well-known/oauth-authorization-server"
-			resp, err := http.Get(issuerMetadataURL)
+			fetchReq, err := http.NewRequestWithContext(r.Context(), http.MethodGet, issuerMetadataURL, nil)
+			if err != nil {
+				http.Error(w, "failed to create metadata request", http.StatusInternalServerError)
+				return
+			}
+			fetchReq.Header.Set("Accept", "application/json")
+
+			resp, err := cfg.httpClient.Do(fetchReq)
 			if err != nil {
 				http.Error(w, "failed to fetch authorization server metadata", http.StatusBadGateway)
 				return
 			}
 			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				http.Error(w, fmt.Sprintf("authorization server returned HTTP %d", resp.StatusCode), http.StatusBadGateway)
+				return
+			}
 
 			var metadata map[string]any
 			if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {

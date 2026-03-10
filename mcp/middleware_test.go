@@ -150,6 +150,65 @@ func TestRequireBearerAuth_InsufficientScope(t *testing.T) {
 	}
 }
 
+func TestRequireBearerAuth_ExpiredToken(t *testing.T) {
+	verifier := &mockTokenVerifier{
+		verifyFunc: func(_ context.Context, token string) (*AuthInfo, error) {
+			return &AuthInfo{
+				Token:     token,
+				ClientID:  "client-123",
+				Scopes:    []string{"read"},
+				ExpiresAt: 1000, // far in the past
+			}, nil
+		},
+	}
+
+	handler := RequireBearerAuth(WithVerifier(verifier))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("handler should not be called for expired token")
+	}))
+
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer expired-token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status: got %d, want 401", rec.Code)
+	}
+
+	challenge := rec.Header().Get("WWW-Authenticate")
+	if !strings.Contains(challenge, "Token has expired") {
+		t.Errorf("expected 'Token has expired' in challenge, got %q", challenge)
+	}
+}
+
+func TestRequireBearerAuth_NoExpiry(t *testing.T) {
+	verifier := &mockTokenVerifier{
+		verifyFunc: func(_ context.Context, token string) (*AuthInfo, error) {
+			return &AuthInfo{
+				Token:     token,
+				ClientID:  "client-123",
+				Scopes:    []string{"read"},
+				ExpiresAt: 0, // no expiry set
+			}, nil
+		},
+	}
+
+	handler := RequireBearerAuth(WithVerifier(verifier))(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/api/test", nil)
+	req.Header.Set("Authorization", "Bearer no-expiry-token")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200 (no expiry should pass)", rec.Code)
+	}
+}
+
 func TestAuthInfoFromRequest_NilWhenNotSet(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/test", nil)
 	info := AuthInfoFromRequest(req)

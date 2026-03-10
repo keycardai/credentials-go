@@ -141,6 +141,44 @@ func TestTokenExchangeClient_ErrorResponse(t *testing.T) {
 	}
 }
 
+func TestTokenExchangeClient_TokenEndpoint(t *testing.T) {
+	requestCount := 0
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/oauth-authorization-server" {
+			requestCount++
+			json.NewEncoder(w).Encode(map[string]string{
+				"issuer":         "http://" + r.Host,
+				"token_endpoint": "http://" + r.Host + "/token",
+			})
+		}
+	}))
+	defer tokenServer.Close()
+
+	client := NewTokenExchangeClient(tokenServer.URL)
+
+	// First call triggers discovery
+	endpoint, err := client.TokenEndpoint(context.Background())
+	if err != nil {
+		t.Fatalf("TokenEndpoint: %v", err)
+	}
+	expectedEndpoint := tokenServer.URL + "/token"
+	if endpoint != expectedEndpoint {
+		t.Errorf("endpoint: got %q, want %q", endpoint, expectedEndpoint)
+	}
+
+	// Second call should use cache (no additional discovery request)
+	endpoint2, err := client.TokenEndpoint(context.Background())
+	if err != nil {
+		t.Fatalf("TokenEndpoint (cached): %v", err)
+	}
+	if endpoint2 != expectedEndpoint {
+		t.Errorf("cached endpoint: got %q, want %q", endpoint2, expectedEndpoint)
+	}
+	if requestCount != 1 {
+		t.Errorf("expected 1 discovery request, got %d", requestCount)
+	}
+}
+
 func TestTokenExchangeClient_ClientAssertionFields(t *testing.T) {
 	var receivedAssertion, receivedAssertionType string
 
