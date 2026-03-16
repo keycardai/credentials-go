@@ -33,6 +33,7 @@ type TokenResponse struct {
 	RefreshToken    string   `json:"refresh_token,omitempty"`
 	Scope           []string `json:"scope,omitempty"`
 	IssuedTokenType string   `json:"issued_token_type,omitempty"`
+	UserID          string   `json:"user_id,omitempty"`
 }
 
 // TokenExchangeClientOption configures a TokenExchangeClient.
@@ -231,6 +232,9 @@ func deserializeTokenResponse(resp *http.Response) (*TokenResponse, error) {
 	}
 	if v, ok := raw["scope"].(string); ok {
 		result.Scope = strings.Fields(v)
+	}
+	if v, ok := raw["user_id"].(string); ok {
+		result.UserID = string(v)
 	}
 
 	return result, nil
