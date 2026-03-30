@@ -119,17 +119,21 @@ func (c *TokenExchangeClient) ExchangeToken(ctx context.Context, req TokenExchan
 
 	if resp.StatusCode != http.StatusOK {
 		var errBody map[string]any
-		_ = json.NewDecoder(resp.Body).Decode(&errBody)
-
-		errDetail := ""
-		if desc, ok := errBody["error_description"].(string); ok {
-			errDetail = desc
-		} else if code, ok := errBody["error"].(string); ok {
-			errDetail = code
-		}
-
-		if errDetail != "" {
-			return nil, fmt.Errorf("token exchange failed (HTTP %d): %s", resp.StatusCode, errDetail)
+		if err := json.NewDecoder(resp.Body).Decode(&errBody); err == nil {
+			if errCode, ok := errBody["error"].(string); ok {
+				oauthErr := &OAuthError{
+					ErrorCode: errCode,
+				}
+				if desc, ok := errBody["error_description"].(string); ok {
+					oauthErr.Message = desc
+				} else {
+					oauthErr.Message = errCode
+				}
+				if uri, ok := errBody["error_uri"].(string); ok {
+					oauthErr.ErrorURI = uri
+				}
+				return nil, oauthErr
+			}
 		}
 		return nil, fmt.Errorf("token exchange failed (HTTP %d)", resp.StatusCode)
 	}

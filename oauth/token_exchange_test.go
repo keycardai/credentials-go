@@ -3,8 +3,10 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -135,9 +137,48 @@ func TestTokenExchangeClient_ErrorResponse(t *testing.T) {
 		t.Fatal("expected error")
 	}
 
-	expected := "token exchange failed (HTTP 400): token expired"
-	if err.Error() != expected {
-		t.Errorf("error: got %q, want %q", err.Error(), expected)
+	var oauthErr *OAuthError
+	if !errors.As(err, &oauthErr) {
+		t.Fatalf("expected *OAuthError, got %T: %v", err, err)
+	}
+	if oauthErr.ErrorCode != "invalid_grant" {
+		t.Errorf("error code: got %q, want %q", oauthErr.ErrorCode, "invalid_grant")
+	}
+	if oauthErr.Message != "token expired" {
+		t.Errorf("message: got %q, want %q", oauthErr.Message, "token expired")
+	}
+}
+
+func TestTokenExchangeClient_ErrorResponse_NonJSON(t *testing.T) {
+	tokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			json.NewEncoder(w).Encode(map[string]string{
+				"issuer":         "http://" + r.Host,
+				"token_endpoint": "http://" + r.Host + "/token",
+			})
+		case "/token":
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte("Internal Server Error"))
+		}
+	}))
+	defer tokenServer.Close()
+
+	client := NewTokenExchangeClient(tokenServer.URL)
+
+	_, err := client.ExchangeToken(context.Background(), TokenExchangeRequest{
+		SubjectToken: "some-token",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+
+	var oauthErr *OAuthError
+	if errors.As(err, &oauthErr) {
+		t.Fatalf("expected generic error, got *OAuthError: %v", err)
+	}
+	if !strings.Contains(err.Error(), "HTTP 500") {
+		t.Errorf("error should contain HTTP status: got %q", err.Error())
 	}
 }
 

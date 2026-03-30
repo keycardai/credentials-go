@@ -42,7 +42,7 @@ func TestAccessContext_Status(t *testing.T) {
 	t.Run("partial_error", func(t *testing.T) {
 		ac := NewAccessContext()
 		ac.SetToken("res1", &oauth.TokenResponse{AccessToken: "t1"})
-		ac.SetResourceError("res2", ErrorDetail{Error: "failed"})
+		ac.SetResourceError("res2", ErrorDetail{Message: "failed"})
 		if ac.Status() != StatusPartialError {
 			t.Errorf("status: got %q, want partial_error", ac.Status())
 		}
@@ -50,7 +50,7 @@ func TestAccessContext_Status(t *testing.T) {
 
 	t.Run("error", func(t *testing.T) {
 		ac := NewAccessContext()
-		ac.SetError(ErrorDetail{Error: "global failure"})
+		ac.SetError(ErrorDetail{Message: "global failure"})
 		if ac.Status() != StatusError {
 			t.Errorf("status: got %q, want error", ac.Status())
 		}
@@ -59,7 +59,7 @@ func TestAccessContext_Status(t *testing.T) {
 
 func TestAccessContext_AccessWithGlobalError(t *testing.T) {
 	ac := NewAccessContext()
-	ac.SetError(ErrorDetail{Error: "global failure"})
+	ac.SetError(ErrorDetail{Message: "global failure"})
 
 	_, err := ac.Access("https://api.github.com")
 	if err == nil {
@@ -73,7 +73,7 @@ func TestAccessContext_AccessWithGlobalError(t *testing.T) {
 
 func TestAccessContext_AccessWithResourceError(t *testing.T) {
 	ac := NewAccessContext()
-	ac.SetResourceError("https://api.github.com", ErrorDetail{Error: "exchange failed"})
+	ac.SetResourceError("https://api.github.com", ErrorDetail{Message: "exchange failed"})
 
 	_, err := ac.Access("https://api.github.com")
 	if err == nil {
@@ -85,7 +85,7 @@ func TestAccessContext_SuccessfulAndFailedResources(t *testing.T) {
 	ac := NewAccessContext()
 	ac.SetToken("res1", &oauth.TokenResponse{AccessToken: "t1"})
 	ac.SetToken("res2", &oauth.TokenResponse{AccessToken: "t2"})
-	ac.SetResourceError("res3", ErrorDetail{Error: "failed"})
+	ac.SetResourceError("res3", ErrorDetail{Message: "failed"})
 
 	successful := ac.SuccessfulResources()
 	if len(successful) != 2 {
@@ -100,7 +100,7 @@ func TestAccessContext_SuccessfulAndFailedResources(t *testing.T) {
 
 func TestAccessContext_SetTokenClearsError(t *testing.T) {
 	ac := NewAccessContext()
-	ac.SetResourceError("res1", ErrorDetail{Error: "failed"})
+	ac.SetResourceError("res1", ErrorDetail{Message: "failed"})
 	ac.SetToken("res1", &oauth.TokenResponse{AccessToken: "t1"})
 
 	if ac.HasResourceError("res1") {

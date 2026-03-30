@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -21,8 +22,10 @@ const (
 
 // ErrorDetail describes an error during token exchange.
 type ErrorDetail struct {
-	Error    string `json:"error"`
-	RawError string `json:"raw_error,omitempty"`
+	Message     string `json:"message"`
+	Code        string `json:"code,omitempty"`
+	Description string `json:"description,omitempty"`
+	RawError    string `json:"raw_error,omitempty"`
 }
 
 // AccessContext holds the results of token exchanges for multiple resources.
@@ -69,10 +72,10 @@ func (ac *AccessContext) SetError(detail ErrorDetail) {
 // Returns ResourceAccessError if the resource has an error or no token.
 func (ac *AccessContext) Access(resource string) (*oauth.TokenResponse, error) {
 	if ac.globalError != nil {
-		return nil, &ResourceAccessError{Message: ac.globalError.Error}
+		return nil, &ResourceAccessError{Message: ac.globalError.Message}
 	}
 	if _, hasErr := ac.resourceErrors[resource]; hasErr {
-		return nil, &ResourceAccessError{Message: ac.resourceErrors[resource].Error}
+		return nil, &ResourceAccessError{Message: ac.resourceErrors[resource].Message}
 	}
 	token, ok := ac.tokens[resource]
 	if !ok {
@@ -122,7 +125,7 @@ func (ac *AccessContext) GetResourceError(resource string) *ErrorDetail {
 }
 
 // GetErrors returns all errors (global + per-resource).
-func (ac *AccessContext) GetErrors() (resourceErrors map[string]ErrorDetail, globalError *ErrorDetail) {
+func (ac *AccessContext) GetErrors() (resources map[string]ErrorDetail, globalError *ErrorDetail) {
 	result := make(map[string]ErrorDetail, len(ac.resourceErrors))
 	for k, v := range ac.resourceErrors {
 		result[k] = v
@@ -232,7 +235,7 @@ func (p *AuthProvider) Grant(resources ...string) func(http.Handler) http.Handle
 			if authInfo == nil || authInfo.Token == "" {
 				ac := NewAccessContext()
 				ac.SetError(ErrorDetail{
-					Error: "No authentication token available. Ensure RequireBearerAuth() middleware runs before Grant().",
+					Message: "No authentication token available. Ensure RequireBearerAuth() middleware runs before Grant().",
 				})
 				ctx := context.WithValue(r.Context(), accessContextKey, ac)
 				next.ServeHTTP(w, r.WithContext(ctx))
@@ -253,7 +256,7 @@ func (p *AuthProvider) ExchangeTokens(ctx context.Context, subjectToken string, 
 	client, err := p.getOrCreateClient()
 	if err != nil {
 		ac.SetError(ErrorDetail{
-			Error:    "Failed to initialize OAuth client. Server configuration issue.",
+			Message:  "Failed to initialize OAuth client. Server configuration issue.",
 			RawError: err.Error(),
 		})
 		return ac
@@ -272,7 +275,7 @@ func (p *AuthProvider) ExchangeTokens(ctx context.Context, subjectToken string, 
 			req, err = p.credential.PrepareTokenExchangeRequest(ctx, subjectToken, resource, opts)
 			if err != nil {
 				ac.SetResourceError(resource, ErrorDetail{
-					Error:    fmt.Sprintf("Token exchange failed for %s: %v", resource, err),
+					Message:  fmt.Sprintf("Token exchange failed for %s", resource),
 					RawError: err.Error(),
 				})
 				continue
@@ -287,10 +290,19 @@ func (p *AuthProvider) ExchangeTokens(ctx context.Context, subjectToken string, 
 
 		resp, err := client.ExchangeToken(ctx, *req)
 		if err != nil {
-			ac.SetResourceError(resource, ErrorDetail{
-				Error:    fmt.Sprintf("Token exchange failed for %s: %v", resource, err),
-				RawError: err.Error(),
-			})
+			detail := ErrorDetail{
+				Message: fmt.Sprintf("Token exchange failed for %s", resource),
+			}
+			var oauthErr *oauth.OAuthError
+			if errors.As(err, &oauthErr) {
+				detail.Code = oauthErr.ErrorCode
+				if oauthErr.Message != "" {
+					detail.Description = oauthErr.Message
+				}
+			} else {
+				detail.RawError = err.Error()
+			}
+			ac.SetResourceError(resource, detail)
 			continue
 		}
 
