@@ -7,6 +7,23 @@ on:
     branches: [main]
 
 jobs:
+  validate-commits:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install commitizen
+        run: pip install commitizen
+      - name: Validate commit messages
+        run: |
+          BASE_SHA=$(git merge-base origin/main HEAD)
+          cz check --rev-range "${BASE_SHA}..HEAD"
+
   test:
     runs-on: ubuntu-latest
     strategy:
