@@ -51,9 +51,9 @@ func main() {
 		if ac.HasErrors() {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
-			resourceErrors, globalError := ac.GetErrors()
+			resources, globalError := ac.GetErrors()
 			json.NewEncoder(w).Encode(map[string]any{
-				"errors":       resourceErrors,
+				"resources":    resources,
 				"global_error": globalError,
 			})
 			return
