@@ -1,11 +1,11 @@
-package mcpserver
+package mcpofficial
 
 import (
 	"log"
 	"net/http"
 
-	"github.com/keycardai/credentials-go/mcp"
-	"github.com/mark3labs/mcp-go/server"
+	keycardmcp "github.com/keycardai/credentials-go/mcp"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Option configures the MCP server handler.
@@ -65,8 +65,9 @@ func WithGrant(resources ...string) Option {
 //   - /.well-known/* — OAuth metadata endpoints
 //   - /mcp (or custom path) — MCP Streamable HTTP transport, protected by bearer auth
 //
-// The mcpServer should be created and configured with tools using the mcp-go library.
-func NewHandler(mcpServer *server.MCPServer, opts ...Option) (http.Handler, error) {
+// The mcpServer should be created and configured with tools using the official
+// modelcontextprotocol/go-sdk library.
+func NewHandler(mcpServer *mcp.Server, opts ...Option) (http.Handler, error) {
 	cfg := config{
 		mcpPath: "/mcp",
 		scopes:  []string{"mcp:tools"},
@@ -75,55 +76,58 @@ func NewHandler(mcpServer *server.MCPServer, opts ...Option) (http.Handler, erro
 		opt(&cfg)
 	}
 
-	mux := http.NewServeMux()
+	httpMux := http.NewServeMux()
 
 	// OAuth metadata endpoints
-	var metadataOpts []mcp.MetadataOption
+	var metadataOpts []keycardmcp.MetadataOption
 	if cfg.zoneURL != "" {
-		metadataOpts = append(metadataOpts, mcp.WithIssuer(cfg.zoneURL))
+		metadataOpts = append(metadataOpts, keycardmcp.WithIssuer(cfg.zoneURL))
 	}
 	if len(cfg.scopes) > 0 {
-		metadataOpts = append(metadataOpts, mcp.WithScopesSupported(cfg.scopes))
+		metadataOpts = append(metadataOpts, keycardmcp.WithScopesSupported(cfg.scopes))
 	}
 	if cfg.resourceName != "" {
-		metadataOpts = append(metadataOpts, mcp.WithResourceName(cfg.resourceName))
+		metadataOpts = append(metadataOpts, keycardmcp.WithResourceName(cfg.resourceName))
 	}
-	mux.Handle("/.well-known/", mcp.AuthMetadataHandler(metadataOpts...))
+	httpMux.Handle("/.well-known/", keycardmcp.AuthMetadataHandler(metadataOpts...))
 
-	// MCP transport handler
-	mcpHandler := server.NewStreamableHTTPServer(mcpServer)
+	// MCP transport handler (official SDK)
+	mcpHandler := mcp.NewStreamableHTTPHandler(
+		func(r *http.Request) *mcp.Server { return mcpServer },
+		&mcp.StreamableHTTPOptions{},
+	)
 
 	// Bearer auth middleware
-	var bearerOpts []mcp.BearerAuthOption
+	var bearerOpts []keycardmcp.BearerAuthOption
 	if len(cfg.scopes) > 0 {
-		bearerOpts = append(bearerOpts, mcp.WithRequiredScopes(cfg.scopes...))
+		bearerOpts = append(bearerOpts, keycardmcp.WithRequiredScopes(cfg.scopes...))
 	}
-	protectedHandler := mcp.RequireBearerAuth(bearerOpts...)(mcpHandler)
+	protectedHandler := keycardmcp.RequireBearerAuth(bearerOpts...)(mcpHandler)
 
 	// Optional delegated access middleware
 	if cfg.clientID != "" && cfg.clientSecret != "" && len(cfg.grants) > 0 {
-		authProvider, err := mcp.NewAuthProvider(
-			mcp.WithZoneURL(cfg.zoneURL),
-			mcp.WithApplicationCredential(
-				mcp.NewClientSecret(cfg.clientID, cfg.clientSecret),
+		authProvider, err := keycardmcp.NewAuthProvider(
+			keycardmcp.WithZoneURL(cfg.zoneURL),
+			keycardmcp.WithApplicationCredential(
+				keycardmcp.NewClientSecret(cfg.clientID, cfg.clientSecret),
 			),
 		)
 		if err != nil {
 			return nil, err
 		}
-		protectedHandler = mcp.RequireBearerAuth(bearerOpts...)(
+		protectedHandler = keycardmcp.RequireBearerAuth(bearerOpts...)(
 			authProvider.Grant(cfg.grants...)(mcpHandler),
 		)
 	}
 
-	mux.Handle(cfg.mcpPath, protectedHandler)
+	httpMux.Handle(cfg.mcpPath, protectedHandler)
 
-	return mux, nil
+	return httpMux, nil
 }
 
 // ListenAndServe starts an MCP server on the given address.
 // This is a convenience wrapper around NewHandler and http.ListenAndServe.
-func ListenAndServe(addr string, mcpServer *server.MCPServer, opts ...Option) error {
+func ListenAndServe(addr string, mcpServer *mcp.Server, opts ...Option) error {
 	handler, err := NewHandler(mcpServer, opts...)
 	if err != nil {
 		return err

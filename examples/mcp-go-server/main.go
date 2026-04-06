@@ -1,7 +1,7 @@
-// Package main demonstrates a complete MCP server using the mcpserver package.
+// Package main demonstrates a complete MCP server using the mcpgo package.
 //
 // This shows the simplest path to a working MCP server with Keycard authentication.
-// The mcpserver package handles all wiring between mcp-go (transport) and
+// The mcpgo package handles all wiring between mcp-go (transport) and
 // credentials-go (OAuth auth) — you just define your tools.
 package main
 
@@ -15,7 +15,7 @@ import (
 	"os"
 
 	"github.com/keycardai/credentials-go/mcp"
-	"github.com/keycardai/credentials-go/mcpserver"
+	"github.com/keycardai/credentials-go/mcpgo"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -45,17 +45,17 @@ func main() {
 	)
 
 	// 2. Create handler with Keycard auth — all wiring is automatic
-	opts := []mcpserver.Option{
-		mcpserver.WithZoneURL(zoneURL),
-		mcpserver.WithResourceName("Hello World MCP Server"),
-		mcpserver.WithScopes("mcp:tools"),
+	opts := []mcpgo.Option{
+		mcpgo.WithZoneURL(zoneURL),
+		mcpgo.WithResourceName("Hello World MCP Server"),
+		mcpgo.WithScopes("mcp:tools"),
 	}
 
 	// Enable delegated access if credentials are configured
 	if clientID := os.Getenv("KEYCARD_CLIENT_ID"); clientID != "" {
 		opts = append(opts,
-			mcpserver.WithClientCredentials(clientID, os.Getenv("KEYCARD_CLIENT_SECRET")),
-			mcpserver.WithGrant("https://api.github.com"),
+			mcpgo.WithClientCredentials(clientID, os.Getenv("KEYCARD_CLIENT_SECRET")),
+			mcpgo.WithGrant("https://api.github.com"),
 		)
 	}
 
@@ -64,7 +64,7 @@ func main() {
 	if port := os.Getenv("PORT"); port != "" {
 		addr = ":" + port
 	}
-	log.Fatal(mcpserver.ListenAndServe(addr, s, opts...))
+	log.Fatal(mcpgo.ListenAndServe(addr, s, opts...))
 }
 
 // helloHandler demonstrates accessing Keycard auth info from a tool handler.
