@@ -1,8 +1,7 @@
-// Package main demonstrates a complete MCP server using the mcpgo package.
+// Authenticated MCP server using mark3labs/mcp-go with Keycard OAuth.
 //
-// This shows the simplest path to a working MCP server with Keycard authentication.
-// The mcpgo package handles all wiring between mcp-go (transport) and
-// credentials-go (OAuth auth) — you just define your tools.
+// The credentials-go/mcp package provides composable HTTP middleware — you
+// bring your own MCP library and mux, Keycard handles auth and metadata.
 package main
 
 import (
@@ -15,7 +14,6 @@ import (
 	"os"
 
 	"github.com/keycardai/credentials-go/mcp"
-	"github.com/keycardai/credentials-go/mcpgo"
 	mcpgo "github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -26,7 +24,7 @@ func main() {
 		log.Fatal("KEYCARD_ZONE_URL environment variable is required")
 	}
 
-	// 1. Create MCP server and register tools
+	// 1. Create your MCP server and register tools (pure mcp-go, no Keycard involvement)
 	s := server.NewMCPServer("Hello World MCP Server", "1.0.0")
 
 	s.AddTool(
@@ -44,30 +42,51 @@ func main() {
 		githubUserHandler,
 	)
 
-	// 2. Create handler with Keycard auth — all wiring is automatic
-	opts := []mcpgo.Option{
-		mcpgo.WithZoneURL(zoneURL),
-		mcpgo.WithResourceName("Hello World MCP Server"),
-		mcpgo.WithScopes("mcp:tools"),
-	}
+	// 2. Get the MCP HTTP handler from mcp-go
+	mcpHandler := server.NewStreamableHTTPServer(s)
 
-	// Enable delegated access if credentials are configured
+	// 3. Set up your own mux and mount Keycard auth + MCP transport
+	httpMux := http.NewServeMux()
+
+	// OAuth metadata — lets MCP clients discover how to authenticate
+	httpMux.Handle("/.well-known/", mcp.AuthMetadataHandler(
+		mcp.WithIssuer(zoneURL),
+		mcp.WithScopesSupported([]string{"mcp:tools"}),
+		mcp.WithResourceName("Hello World MCP Server"),
+	))
+
+	// Protect /mcp with bearer auth
+	protected := mcp.RequireBearerAuth(
+		mcp.WithRequiredScopes("mcp:tools"),
+	)(mcpHandler)
+
+	// Optional: add delegated access for token exchange
 	if clientID := os.Getenv("KEYCARD_CLIENT_ID"); clientID != "" {
-		opts = append(opts,
-			mcpgo.WithClientCredentials(clientID, os.Getenv("KEYCARD_CLIENT_SECRET")),
-			mcpgo.WithGrant("https://api.github.com"),
+		authProvider, err := mcp.NewAuthProvider(
+			mcp.WithZoneURL(zoneURL),
+			mcp.WithApplicationCredential(
+				mcp.NewClientSecret(clientID, os.Getenv("KEYCARD_CLIENT_SECRET")),
+			),
 		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		protected = mcp.RequireBearerAuth(
+			mcp.WithRequiredScopes("mcp:tools"),
+		)(authProvider.Grant("https://api.github.com")(mcpHandler))
 	}
 
-	// 3. Start the server
+	httpMux.Handle("/mcp", protected)
+
+	// 4. Start
 	addr := ":8080"
 	if port := os.Getenv("PORT"); port != "" {
 		addr = ":" + port
 	}
-	log.Fatal(mcpgo.ListenAndServe(addr, s, opts...))
+	log.Printf("MCP server listening on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, httpMux))
 }
 
-// helloHandler demonstrates accessing Keycard auth info from a tool handler.
 func helloHandler(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	name, _ := request.GetArguments()["name"].(string)
 	if name == "" {
@@ -75,7 +94,6 @@ func helloHandler(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.Ca
 	}
 
 	authInfo := mcp.AuthInfoFromContext(ctx)
-
 	var message string
 	if authInfo != nil {
 		message = fmt.Sprintf("Hello, %s! Authenticated as client: %s", name, authInfo.ClientID)
@@ -86,7 +104,6 @@ func helloHandler(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.Ca
 	return mcpgo.NewToolResultText(message), nil
 }
 
-// githubUserHandler demonstrates delegated access using token exchange.
 func githubUserHandler(ctx context.Context, request mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
 	ac := mcp.AccessContextFromContext(ctx)
 	if ac == nil {
