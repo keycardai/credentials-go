@@ -1,3 +1,18 @@
+## v0.3.0 (2026-04-26)
+
+
+- feat: add ClientCredentialsClient for autonomous workload access
+- Add oauth.ClientCredentialsClient alongside TokenExchangeClient to
+support RFC 6749 Section 4.4 client_credentials grants. This enables
+workloads to authenticate directly (e.g., via OIDC workload identity)
+and retrieve Vault-managed credentials without a subject_token.
+- Follows the same patterns as TokenExchangeClient:
+- Lazy metadata discovery via sync.Once
+- Functional option configuration
+- Shared deserializeTokenResponse for response parsing
+- OAuthError for structured error handling
+- Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
 ## v0.2.0 (2026-04-01)
 
 
