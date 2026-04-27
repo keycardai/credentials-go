@@ -1,5 +1,8 @@
 // Package keycardai provides the Keycard Go SDK for OAuth 2.0 and MCP authentication.
 //
+// Preview: this SDK has not reached parity with the Keycard Python SDK.
+// APIs may change between minor versions until 1.0.
+//
 // The SDK is organized into two sub-packages:
 //
 //   - [github.com/keycardai/credentials-go/oauth] — Pure OAuth 2.0 primitives: JWT signing/verification,
