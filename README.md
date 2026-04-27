@@ -1,5 +1,9 @@
 # Keycard Go SDK
 
+> **Preview.** This SDK has not reached parity with the Keycard Python
+> SDK. APIs may change between minor versions. The preview label will
+> be removed once feature parity is reached.
+
 Go SDK for [Keycard](https://keycard.cloud) — OAuth 2.0 and MCP authentication.
 
 ## Installation
