@@ -20,14 +20,28 @@ const (
 // AuthInfoFromRequest retrieves the AuthInfo from the request context.
 // Returns nil if no AuthInfo is present (e.g., RequireBearerAuth middleware was not applied).
 func AuthInfoFromRequest(r *http.Request) *AuthInfo {
-	info, _ := r.Context().Value(authInfoKey).(*AuthInfo)
+	return AuthInfoFromContext(r.Context())
+}
+
+// AuthInfoFromContext retrieves the AuthInfo from a context.
+// Use this in MCP tool handlers (e.g., mcp-go) where only a context.Context is available.
+// Returns nil if no AuthInfo is present.
+func AuthInfoFromContext(ctx context.Context) *AuthInfo {
+	info, _ := ctx.Value(authInfoKey).(*AuthInfo)
 	return info
 }
 
 // AccessContextFromRequest retrieves the AccessContext from the request context.
 // Returns nil if no AccessContext is present (e.g., Grant middleware was not applied).
 func AccessContextFromRequest(r *http.Request) *AccessContext {
-	ac, _ := r.Context().Value(accessContextKey).(*AccessContext)
+	return AccessContextFromContext(r.Context())
+}
+
+// AccessContextFromContext retrieves the AccessContext from a context.
+// Use this in MCP tool handlers (e.g., mcp-go) where only a context.Context is available.
+// Returns nil if no AccessContext is present.
+func AccessContextFromContext(ctx context.Context) *AccessContext {
+	ac, _ := ctx.Value(accessContextKey).(*AccessContext)
 	return ac
 }
 
