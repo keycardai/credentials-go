@@ -142,6 +142,7 @@ func TestImpersonate_UnknownUserIdentifier(t *testing.T) {
 	client := NewTokenExchangeClient(f.server.URL, WithClientCredentials("app", "secret"))
 	_, err := client.Impersonate(context.Background(), ImpersonateRequest{
 		UserIdentifier: "ghost@example.com",
+		Resource:       "https://api.example.com",
 	})
 	var oauthErr *OAuthError
 	if !errors.As(err, &oauthErr) {
@@ -159,6 +160,7 @@ func TestImpersonate_UnauthorizedClient(t *testing.T) {
 	client := NewTokenExchangeClient(f.server.URL, WithClientCredentials("app", "secret"))
 	_, err := client.Impersonate(context.Background(), ImpersonateRequest{
 		UserIdentifier: "alice@example.com",
+		Resource:       "https://api.example.com",
 	})
 	var oauthErr *OAuthError
 	if !errors.As(err, &oauthErr) {
@@ -169,20 +171,18 @@ func TestImpersonate_UnauthorizedClient(t *testing.T) {
 	}
 }
 
-// Spec table row 4: resource omitted → exchange call omits resource param.
-func TestImpersonate_ResourceOmitted(t *testing.T) {
-	f := newImpersonateFixture(t, ccOKResponder(), exchangeOKResponder())
-
-	client := NewTokenExchangeClient(f.server.URL, WithClientCredentials("app", "secret"))
+// Spec table row 4: resource omitted → client-side validation error (resource is required).
+func TestImpersonate_ResourceRequiredLocally(t *testing.T) {
+	// No fixture — the request must be rejected before any HTTP call.
+	client := NewTokenExchangeClient("http://unused.invalid")
 	_, err := client.Impersonate(context.Background(), ImpersonateRequest{
 		UserIdentifier: "alice@example.com",
 	})
-	if err != nil {
-		t.Fatalf("Impersonate: %v", err)
+	if err == nil {
+		t.Fatal("expected error for missing Resource")
 	}
-	exchange := f.calls[1]
-	if exchange.Has("resource") {
-		t.Errorf("resource should be omitted, got %q", exchange.Get("resource"))
+	if !strings.Contains(err.Error(), "Resource") {
+		t.Errorf("error should mention Resource, got: %v", err)
 	}
 }
 

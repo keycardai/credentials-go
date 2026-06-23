@@ -4,9 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"net/http"
-	"net/url"
 	"strings"
 )
 
@@ -26,9 +23,9 @@ const substituteUserActorTokenType = "urn:ietf:params:oauth:token-type:access_to
 // credential is used both to mint the actor token (via a client_credentials
 // grant) and to authenticate the exchange request.
 type ImpersonateRequest struct {
-	// UserIdentifier is the target user. Becomes "sub" in the issued token.
+	// UserIdentifier is the target user. Becomes "sub" in the issued token. Required.
 	UserIdentifier string
-	// Resource is the target resource URI for the issued token. Optional.
+	// Resource is the target resource URI for the issued token. Required.
 	Resource string
 	// Scopes are the scopes requested for the issued token. Optional.
 	Scopes []string
@@ -50,8 +47,11 @@ func (c *TokenExchangeClient) Impersonate(ctx context.Context, req ImpersonateRe
 	if req.UserIdentifier == "" {
 		return nil, errors.New("oauth: ImpersonateRequest.UserIdentifier is required")
 	}
+	if req.Resource == "" {
+		return nil, errors.New("oauth: ImpersonateRequest.Resource is required")
+	}
 
-	actor, err := c.grantClientCredentials(ctx)
+	actor, err := c.clientCredentialsClient().RequestToken(ctx, ClientCredentialsRequest{})
 	if err != nil {
 		return nil, err
 	}
@@ -64,57 +64,6 @@ func (c *TokenExchangeClient) Impersonate(ctx context.Context, req ImpersonateRe
 		Resource:         req.Resource,
 		Scope:            strings.Join(req.Scopes, " "),
 	})
-}
-
-// grantClientCredentials performs an RFC 6749 §4.4 client_credentials grant
-// against this client's token endpoint, reusing its configured credentials and
-// HTTP client. Returns the access token to be used as actor_token in the
-// subsequent impersonation exchange.
-func (c *TokenExchangeClient) grantClientCredentials(ctx context.Context) (*TokenResponse, error) {
-	tokenEndpoint, err := c.getTokenEndpoint(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	body := url.Values{}
-	body.Set("grant_type", "client_credentials")
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader(body.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("creating client_credentials request: %w", err)
-	}
-	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	if c.cfg.clientID != "" && c.cfg.clientSecret != "" {
-		httpReq.SetBasicAuth(c.cfg.clientID, c.cfg.clientSecret)
-	}
-
-	resp, err := c.cfg.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("client_credentials request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		var errBody map[string]any
-		if decErr := json.NewDecoder(resp.Body).Decode(&errBody); decErr == nil {
-			if errCode, ok := errBody["error"].(string); ok {
-				oauthErr := &OAuthError{ErrorCode: errCode}
-				if desc, ok := errBody["error_description"].(string); ok {
-					oauthErr.Message = desc
-				} else {
-					oauthErr.Message = errCode
-				}
-				if uri, ok := errBody["error_uri"].(string); ok {
-					oauthErr.ErrorURI = uri
-				}
-				return nil, oauthErr
-			}
-		}
-		return nil, fmt.Errorf("client_credentials request failed (HTTP %d)", resp.StatusCode)
-	}
-
-	return deserializeTokenResponse(resp)
 }
 
 // buildSubstituteUserToken constructs the unsigned JWT used as subject_token
