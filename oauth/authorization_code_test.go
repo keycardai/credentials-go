@@ -250,6 +250,49 @@ func TestAuthenticate_StateMismatchRejected(t *testing.T) {
 	}
 }
 
+func TestAuthenticate_IgnoresNonGetCallback(t *testing.T) {
+	as := newAuthServer()
+	defer as.Close()
+
+	// A stray non-GET probe (e.g. OPTIONS) to the callback must not consume the
+	// result channel and abort the flow; the real GET redirect still completes it.
+	opener := func(rawURL string) error {
+		u, err := url.Parse(rawURL)
+		if err != nil {
+			return err
+		}
+		state := u.Query().Get("state")
+		cb, err := url.Parse(u.Query().Get("redirect_uri"))
+		if err != nil {
+			return err
+		}
+		go func() {
+			req, _ := http.NewRequest(http.MethodOptions, cb.String(), nil)
+			if resp, err := http.DefaultClient.Do(req); err == nil {
+				resp.Body.Close()
+			}
+			q := cb.Query()
+			q.Set("code", "loopback-code")
+			q.Set("state", state)
+			cb.RawQuery = q.Encode()
+			if resp, err := http.Get(cb.String()); err == nil {
+				resp.Body.Close()
+			}
+		}()
+		return nil
+	}
+
+	tok, err := Authenticate(context.Background(), as.URL, AuthenticateRequest{
+		ClientID: "public-client",
+	}, WithAuthenticateHTTPClient(as.Client()), WithBrowserOpener(opener))
+	if err != nil {
+		t.Fatalf("non-GET probe should be ignored and the flow should complete: %v", err)
+	}
+	if tok.AccessToken != "at" {
+		t.Errorf("access token: got %q, want at", tok.AccessToken)
+	}
+}
+
 func TestResolveIssuerFromChallenge(t *testing.T) {
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)

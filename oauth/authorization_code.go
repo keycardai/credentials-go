@@ -368,6 +368,14 @@ func runLoopbackFlow(ctx context.Context, redirectURI, wantState string, timeout
 
 	mux := http.NewServeMux()
 	mux.HandleFunc(path, func(w http.ResponseWriter, r *http.Request) {
+		// The authorization server delivers the code via a browser GET redirect.
+		// Ignore any other method (an OPTIONS probe, a scanner, a stray request) so
+		// it cannot consume the one-shot result channel and abort the flow.
+		if r.Method != http.MethodGet {
+			w.Header().Set("Allow", http.MethodGet)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		q := r.URL.Query()
 		if oauthErr := q.Get("error"); oauthErr != "" {
 			http.Error(w, "Authentication failed. You can close this window.", http.StatusBadRequest)
