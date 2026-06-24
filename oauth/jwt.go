@@ -325,8 +325,10 @@ func (v *JWTVerifier) Verify(ctx context.Context, tokenString string) (*JWTClaim
 		return nil, &InvalidTokenError{Message: "JWT issuer (iss) is missing or not trusted"}
 	}
 
-	// 4. Required claims (RFC 9068 §2.2): iss (checked above), sub, aud, exp, iat,
-	// and client_id must all be present.
+	// 4. Required claims (RFC 9068 §2.2 access-token profile): iss (checked above),
+	// sub, aud, exp, iat, and client_id must all be present. jti, also listed in
+	// §2.2, is intentionally not enforced here — it scopes replay tracking, not
+	// access validation.
 	if sub, _ := mapClaims["sub"].(string); sub == "" {
 		return nil, &InvalidTokenError{Message: "JWT missing subject (sub) claim"}
 	}
