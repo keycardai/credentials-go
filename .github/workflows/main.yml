@@ -16,9 +16,20 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Push the bump commit with the GH_REPO_ACCESS app token (matching python-sdk
+      # and typescript-sdk). The default GITHUB_TOKEN cannot push to main, which
+      # requires changes via PR under the org ruleset; the app is on the bypass list.
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GH_REPO_ACCESS_APP_ID }}
+          private-key: ${{ secrets.GH_REPO_ACCESS_PRIVATE_KEY }}
+
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
+          token: ${{ steps.generate-token.outputs.token }}
           fetch-depth: 0
 
       - name: Setup Python
