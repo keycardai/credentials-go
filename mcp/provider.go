@@ -192,13 +192,14 @@ func WithProviderHTTPClient(c *http.Client) AuthProviderOption {
 // routes each exchange to the zone that minted the request's token.
 type AuthProvider struct {
 	multiZone   bool
-	defaultZone string          // single-zone issuer URL ("" when multi-zone)
-	zones       map[string]bool // configured zone issuer URLs
+	defaultZone string // single-zone issuer URL ("" when multi-zone)
 	credential  ApplicationCredential
 	httpClient  *http.Client
 
-	mu      sync.Mutex
-	clients map[string]*oauth.TokenExchangeClient // per-zone, lazily created
+	mu sync.Mutex
+	// clients is keyed by zone issuer URL. A key's presence marks a configured zone;
+	// the value is that zone's token-exchange client, created lazily (nil until first use).
+	clients map[string]*oauth.TokenExchangeClient
 }
 
 // NewAuthProvider creates a new AuthProvider with the given options. With a multi-zone
@@ -216,15 +217,15 @@ func NewAuthProvider(opts ...AuthProviderOption) (*AuthProvider, error) {
 	p := &AuthProvider{
 		credential: cfg.applicationCredential,
 		httpClient: cfg.httpClient,
-		zones:      make(map[string]bool),
 		clients:    make(map[string]*oauth.TokenExchangeClient),
 	}
 
-	// A multi-zone credential is self-describing: it carries the zone set.
+	// A multi-zone credential is self-describing: it carries the zone set. Register each
+	// zone with a nil client; the client is created on first use in clientForZone.
 	if mz, ok := cfg.applicationCredential.(MultiZoneCredential); ok && len(mz.Zones()) > 0 {
 		p.multiZone = true
 		for _, zone := range mz.Zones() {
-			p.zones[zone] = true
+			p.clients[zone] = nil
 		}
 		return p, nil
 	}
@@ -239,7 +240,7 @@ func NewAuthProvider(opts ...AuthProviderOption) (*AuthProvider, error) {
 		}
 	}
 	p.defaultZone = zoneURL
-	p.zones[zoneURL] = true
+	p.clients[zoneURL] = nil
 	return p, nil
 }
 
@@ -354,7 +355,12 @@ func (p *AuthProvider) resolveZone(issuer string) (string, error) {
 	if issuer == "" {
 		return "", fmt.Errorf("multi-zone provider could not resolve a zone: the token has no issuer")
 	}
-	if !p.zones[issuer] {
+	// clients is guarded by mu (clientForZone mutates it), so take the lock for the
+	// membership check even though we only read it here.
+	p.mu.Lock()
+	_, configured := p.clients[issuer]
+	p.mu.Unlock()
+	if !configured {
 		return "", fmt.Errorf("multi-zone provider has no credential configured for zone %q", issuer)
 	}
 	return issuer, nil
@@ -366,7 +372,9 @@ func (p *AuthProvider) clientForZone(zone string) *oauth.TokenExchangeClient {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if c, ok := p.clients[zone]; ok {
+	// A zone is registered with a nil client until its first use, so a present-but-nil
+	// entry means "configured, not yet created" and must fall through to creation.
+	if c, ok := p.clients[zone]; ok && c != nil {
 		return c
 	}
 
