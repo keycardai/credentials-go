@@ -187,18 +187,24 @@ func WithProviderHTTPClient(c *http.Client) AuthProviderOption {
 	return func(cfg *authProviderConfig) { cfg.httpClient = c }
 }
 
-// AuthProvider orchestrates token exchange for MCP servers.
+// AuthProvider orchestrates token exchange for MCP servers. It is single-zone unless
+// constructed with a multi-zone credential (NewMultiZoneClientSecret), in which case it
+// routes each exchange to the zone that minted the request's token.
 type AuthProvider struct {
-	zoneURL    string
-	credential ApplicationCredential
-	httpClient *http.Client
+	multiZone   bool
+	defaultZone string // single-zone issuer URL ("" when multi-zone)
+	credential  ApplicationCredential
+	httpClient  *http.Client
 
-	clientOnce sync.Once
-	client     *oauth.TokenExchangeClient
-	clientErr  error
+	mu sync.Mutex
+	// clients is keyed by zone issuer URL. A key's presence marks a configured zone;
+	// the value is that zone's token-exchange client, created lazily (nil until first use).
+	clients map[string]*oauth.TokenExchangeClient
 }
 
-// NewAuthProvider creates a new AuthProvider with the given options.
+// NewAuthProvider creates a new AuthProvider with the given options. With a multi-zone
+// credential the zones are taken from the credential and zoneURL/zoneID are not required;
+// otherwise exactly one zone is configured from zoneURL or zoneID.
 func NewAuthProvider(opts ...AuthProviderOption) (*AuthProvider, error) {
 	cfg := authProviderConfig{
 		baseURL:    "https://keycard.cloud",
@@ -208,21 +214,34 @@ func NewAuthProvider(opts ...AuthProviderOption) (*AuthProvider, error) {
 		opt(&cfg)
 	}
 
+	p := &AuthProvider{
+		credential: cfg.applicationCredential,
+		httpClient: cfg.httpClient,
+		clients:    make(map[string]*oauth.TokenExchangeClient),
+	}
+
+	// A multi-zone credential is self-describing: it carries the zone set. Register each
+	// zone with a nil client; the client is created on first use in clientForZone.
+	if mz, ok := cfg.applicationCredential.(MultiZoneCredential); ok && len(mz.Zones()) > 0 {
+		p.multiZone = true
+		for _, zone := range mz.Zones() {
+			p.clients[zone] = nil
+		}
+		return p, nil
+	}
+
 	zoneURL := cfg.zoneURL
 	if zoneURL == "" {
 		zoneURL = buildZoneURL(cfg.zoneID, cfg.baseURL)
 	}
 	if zoneURL == "" {
 		return nil, &AuthProviderConfigurationError{
-			Message: "either zoneURL or zoneID must be provided",
+			Message: "either zoneURL or zoneID must be provided (or a multi-zone credential)",
 		}
 	}
-
-	return &AuthProvider{
-		zoneURL:    zoneURL,
-		credential: cfg.applicationCredential,
-		httpClient: cfg.httpClient,
-	}, nil
+	p.defaultZone = zoneURL
+	p.clients[zoneURL] = nil
+	return p, nil
 }
 
 // Grant returns middleware that performs token exchange for the specified resources.
@@ -242,26 +261,46 @@ func (p *AuthProvider) Grant(resources ...string) func(http.Handler) http.Handle
 				return
 			}
 
-			ac := p.ExchangeTokens(r.Context(), authInfo.Token, resources...)
+			ac := p.exchange(r.Context(), authInfo.Issuer, authInfo.Token, resources...)
 			ctx := context.WithValue(r.Context(), accessContextKey, ac)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }
 
-// ExchangeTokens performs token exchange directly and returns an AccessContext.
+// ExchangeTokens performs token exchange for a single-zone provider and returns an
+// AccessContext. For a multi-zone provider use ExchangeTokensForZone, or Grant (which
+// routes by the verified token's issuer).
 func (p *AuthProvider) ExchangeTokens(ctx context.Context, subjectToken string, resources ...string) *AccessContext {
+	return p.exchange(ctx, "", subjectToken, resources...)
+}
+
+// ExchangeTokensForZone performs token exchange against the given zone (issuer URL),
+// selecting that zone's credential. It fails closed if the zone is not configured.
+func (p *AuthProvider) ExchangeTokensForZone(ctx context.Context, issuer, subjectToken string, resources ...string) *AccessContext {
+	return p.exchange(ctx, issuer, subjectToken, resources...)
+}
+
+func (p *AuthProvider) exchange(ctx context.Context, issuer, subjectToken string, resources ...string) *AccessContext {
 	ac := NewAccessContext()
 
-	client, err := p.getOrCreateClient()
+	zone, err := p.resolveZone(issuer)
 	if err != nil {
 		ac.SetError(ErrorDetail{
-			Message:  "Failed to initialize OAuth client. Server configuration issue.",
+			Message:  "Could not resolve the request's zone.",
 			RawError: err.Error(),
 		})
 		return ac
 	}
 
+	client := p.clientForZone(zone)
+	if client == nil {
+		ac.SetError(ErrorDetail{
+			Message:  "Could not resolve the request's zone.",
+			RawError: fmt.Sprintf("no token-exchange client for zone %q", zone),
+		})
+		return ac
+	}
 	tokens := make(map[string]*oauth.TokenResponse)
 
 	// Resolve the token endpoint for credential assertion audience.
@@ -313,24 +352,57 @@ func (p *AuthProvider) ExchangeTokens(ctx context.Context, subjectToken string, 
 	return ac
 }
 
-func (p *AuthProvider) getOrCreateClient() (*oauth.TokenExchangeClient, error) {
-	p.clientOnce.Do(func() {
-		var clientOpts []oauth.TokenExchangeClientOption
+// resolveZone picks the zone issuer URL for an exchange. A single-zone provider always
+// uses its configured zone (the issuer is ignored). A multi-zone provider requires the
+// issuer to be one of its configured zones and fails closed otherwise.
+func (p *AuthProvider) resolveZone(issuer string) (string, error) {
+	if !p.multiZone {
+		return p.defaultZone, nil
+	}
+	if issuer == "" {
+		return "", fmt.Errorf("multi-zone provider could not resolve a zone: the token has no issuer")
+	}
+	// clients is guarded by mu (clientForZone mutates it), so take the lock for the
+	// membership check even though we only read it here.
+	p.mu.Lock()
+	_, configured := p.clients[issuer]
+	p.mu.Unlock()
+	if !configured {
+		return "", fmt.Errorf("multi-zone provider has no credential configured for zone %q", issuer)
+	}
+	return issuer, nil
+}
 
-		if p.httpClient != nil {
-			clientOpts = append(clientOpts, oauth.WithTokenExchangeHTTPClient(p.httpClient))
+// clientForZone returns the token-exchange client for a configured zone, creating it on
+// first use with the zone's issuer and credential and caching it. It returns nil when the
+// zone is not configured: a client is only minted for a zone the map already holds, so an
+// unknown zone never gets one. Callers resolve the zone with resolveZone first.
+func (p *AuthProvider) clientForZone(zone string) *oauth.TokenExchangeClient {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	c, ok := p.clients[zone]
+	if !ok {
+		return nil
+	}
+	if c != nil {
+		return c
+	}
+
+	// Configured but not yet created: build the client on first use and cache it.
+	var clientOpts []oauth.TokenExchangeClientOption
+	if p.httpClient != nil {
+		clientOpts = append(clientOpts, oauth.WithTokenExchangeHTTPClient(p.httpClient))
+	}
+	if p.credential != nil {
+		if auth := p.credential.Auth(zone); auth != nil {
+			clientOpts = append(clientOpts, oauth.WithClientCredentials(auth.ClientID, auth.ClientSecret))
 		}
+	}
 
-		if p.credential != nil {
-			if auth := p.credential.Auth(); auth != nil {
-				clientOpts = append(clientOpts, oauth.WithClientCredentials(auth.ClientID, auth.ClientSecret))
-			}
-		}
-
-		p.client = oauth.NewTokenExchangeClient(p.zoneURL, clientOpts...)
-	})
-
-	return p.client, p.clientErr
+	c = oauth.NewTokenExchangeClient(zone, clientOpts...)
+	p.clients[zone] = c
+	return c
 }
 
 func buildZoneURL(zoneID, baseURL string) string {
