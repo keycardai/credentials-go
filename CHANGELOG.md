@@ -1,3 +1,52 @@
+## v0.8.0 (2026-06-29)
+
+
+- feat!: add multi-zone support to the auth provider (ECO-93) (#17)
+- * feat!: add multi-zone support to the auth provider
+- Implements the multi-zone-support spec: one AuthProvider instance can
+serve many Keycard zones, routing each request by the token's issuer.
+- - NewMultiZoneClientSecret(map[issuer]ClientAuth): a self-describing,
+  zone-keyed credential. ApplicationCredential.Auth now takes the zone
+  issuer and resolves per-zone credentials (assertion-based credentials
+  ignore it; an unknown zone returns nil, fail-closed).
+- AuthProvider detects multi-zone from the credential and keeps a
+  per-zone TokenExchangeClient, so discovery/client caches are
+  zone-scoped. Grant routes the exchange to AuthInfo.Issuer;
+  ExchangeTokensForZone selects a zone explicitly. An unresolved or
+  unconfigured zone fails closed with a global AccessContext error.
+- Inbound: AuthInfo gains Issuer (the verified iss);
+  NewMultiZoneTokenVerifier trusts several zones and resolves each
+  token's key from its own zone's JWKS (the Phase 1 multi-issuer
+  verifier already isolates keys per issuer).
+- Zone resolution is the verified token's iss; the spec calls the
+resolution layer an intended per-framework idiom, so a pluggable
+request-based resolver can be added later if a customer needs one.
+- Tests cover the spec's six unit cases: per-zone credential resolution,
+issuer-routed exchange, no cross-zone leakage, fail-closed on
+unresolved/unknown zones, and an end-to-end Grant routed by the token
+issuer.
+- BREAKING CHANGE: ApplicationCredential.Auth() becomes
+Auth(issuer string). Custom credential implementations must update the
+method signature.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * refactor: address multi-zone review on the auth provider
+- - Collapse the separate `zones` set and `clients` cache into one zone-keyed
+  map: a key's presence marks a configured zone, its value is the lazily
+  created client (nil until first use).
+- Fix clientForZone returning the nil placeholder on first use (it now treats
+  present-but-nil as "create"), the bug surfaced by the combined map.
+- resolveZone takes the mutex for its membership read, since clients is now
+  mutated under the lock by clientForZone.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * refactor: do not mint a client for an unconfigured zone
+- clientForZone created a token-exchange client even when the zone was absent from
+the map (not configured). It now returns nil for an unknown zone and only builds
+a client for a configured one (present, created lazily on first use). The exchange
+flow already resolves the zone first; it now also fails closed if the client is nil.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- ---------
+- Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
 ## v0.7.0 (2026-06-29)
 
 
