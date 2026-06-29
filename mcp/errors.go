@@ -29,3 +29,12 @@ type EKSWorkloadIdentityConfigurationError struct {
 func (e *EKSWorkloadIdentityConfigurationError) Error() string {
 	return e.Message
 }
+
+// FlyWorkloadIdentityConfigurationError indicates invalid Fly.io workload identity configuration.
+type FlyWorkloadIdentityConfigurationError struct {
+	Message string
+}
+
+func (e *FlyWorkloadIdentityConfigurationError) Error() string {
+	return e.Message
+}
