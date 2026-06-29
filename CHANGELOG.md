@@ -1,3 +1,26 @@
+## v0.6.0 (2026-06-29)
+
+
+- feat: add dynamic client registration (#16)
+- Implements the dynamic-client-registration spec (RFC 7591) in the oauth
+package. Go previously parsed registration_endpoint during discovery but
+had no call that posted to it.
+- - RegisterClient(ctx, issuer, req, opts...) discovers the registration
+  endpoint and POSTs the client metadata as JSON.
+- RegistrationRequest models the RFC 7591 §2 metadata (all optional,
+  RFC-minimal: only set fields are sent) with an AdditionalMetadata bag
+  merged into the body; named fields win on conflict.
+- RegistrationResponse parses client_id (required), client_secret,
+  issuance/expiry timestamps, and the registration management
+  token/URI, preserving the full raw body for AS-specific fields.
+- WithInitialAccessToken authenticates the request with a Bearer initial
+  access token (RFC 7591 §3.1); a structured 4xx error body surfaces as
+  a typed *OAuthError, otherwise as an *HTTPError.
+- Tests cover body merging (named over vendor keys, RFC-minimal omission),
+response parsing, the missing-client_id error, the typed OAuth error,
+and the initial-access-token header.
+- Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
 ## v0.5.0 (2026-06-29)
 
 
