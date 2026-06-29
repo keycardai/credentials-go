@@ -294,6 +294,13 @@ func (p *AuthProvider) exchange(ctx context.Context, issuer, subjectToken string
 	}
 
 	client := p.clientForZone(zone)
+	if client == nil {
+		ac.SetError(ErrorDetail{
+			Message:  "Could not resolve the request's zone.",
+			RawError: fmt.Sprintf("no token-exchange client for zone %q", zone),
+		})
+		return ac
+	}
 	tokens := make(map[string]*oauth.TokenResponse)
 
 	// Resolve the token endpoint for credential assertion audience.
@@ -366,18 +373,23 @@ func (p *AuthProvider) resolveZone(issuer string) (string, error) {
 	return issuer, nil
 }
 
-// clientForZone returns the token-exchange client for a zone, creating it on first use
-// with that zone's issuer and credential. Clients are cached per zone.
+// clientForZone returns the token-exchange client for a configured zone, creating it on
+// first use with the zone's issuer and credential and caching it. It returns nil when the
+// zone is not configured: a client is only minted for a zone the map already holds, so an
+// unknown zone never gets one. Callers resolve the zone with resolveZone first.
 func (p *AuthProvider) clientForZone(zone string) *oauth.TokenExchangeClient {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// A zone is registered with a nil client until its first use, so a present-but-nil
-	// entry means "configured, not yet created" and must fall through to creation.
-	if c, ok := p.clients[zone]; ok && c != nil {
+	c, ok := p.clients[zone]
+	if !ok {
+		return nil
+	}
+	if c != nil {
 		return c
 	}
 
+	// Configured but not yet created: build the client on first use and cache it.
 	var clientOpts []oauth.TokenExchangeClientOption
 	if p.httpClient != nil {
 		clientOpts = append(clientOpts, oauth.WithTokenExchangeHTTPClient(p.httpClient))
@@ -388,7 +400,7 @@ func (p *AuthProvider) clientForZone(zone string) *oauth.TokenExchangeClient {
 		}
 	}
 
-	c := oauth.NewTokenExchangeClient(zone, clientOpts...)
+	c = oauth.NewTokenExchangeClient(zone, clientOpts...)
 	p.clients[zone] = c
 	return c
 }
