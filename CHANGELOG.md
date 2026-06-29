@@ -1,3 +1,45 @@
+## v0.5.0 (2026-06-29)
+
+
+- feat: add authorization-code-with-PKCE flow (ECO-90) (#15)
+- * feat: add authorization-code-with-PKCE flow
+- Implements the authorization-code-pkce spec in the oauth package, the
+user-facing login primitive the Go SDK was missing entirely.
+- - PKCE primitives: GenerateCodeVerifier (128-char, RFC 7636 §4.1),
+  GenerateCodeChallenge (S256 / plain), GeneratePKCEPair.
+- Building blocks: BuildAuthorizeURL and ExchangeAuthorizationCode
+  (public client sends client_id in the body; confidential client uses
+  HTTP Basic and omits it), reusing discovery and the shared token
+  response shape.
+- High-level Authenticate / AuthenticateFromChallenge: generate a PKCE
+  pair and CSRF state, open the browser, run an RFC 8252 loopback server
+  (default port 8765, 300s timeout), validate state, and exchange the
+  code. ResolveIssuerFromChallenge resolves the issuer from an RFC 9728
+  WWW-Authenticate challenge. Browser launch uses exec.Command (no
+  shell) and is overridable for tests.
+- Tests cover the PKCE primitives (incl. the RFC 7636 known-answer
+vector), the authorize-URL builder, public/confidential code exchange,
+OAuth error responses, the full loopback flow in-process via an injected
+browser opener, CSRF state-mismatch rejection, and challenge-driven
+issuer resolution.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * fix: ignore non-GET requests to the loopback callback
+- The loopback callback handler processed any HTTP method, so a stray
+non-GET request (an OPTIONS probe, a scanner) with no query would fall
+through to the missing-code branch and push an error to the one-shot
+result channel, aborting the login before the real GET redirect arrived.
+Guard the method: non-GET now returns 405 and is ignored, so only the
+browser's GET redirect completes the flow.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * test: add runnable Example functions for PKCE primitives
+- ExampleGenerateCodeChallenge and ExampleBuildAuthorizeURL are Go testable
+examples: `go test` runs them and verifies their output, so the PKCE
+primitives are proven-to-run in CI without needing a live zone. They
+also render as usage docs on pkg.go.dev.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- ---------
+- Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
 ## v0.4.0 (2026-06-24)
 
 
