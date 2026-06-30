@@ -12,6 +12,7 @@ import (
 type ProtectedResourceMetadata struct {
 	Resource              string   `json:"resource"`
 	AuthorizationServers  []string `json:"authorization_servers,omitempty"`
+	JWKSURI               string   `json:"jwks_uri,omitempty"`
 	ScopesSupported       []string `json:"scopes_supported,omitempty"`
 	ResourceName          string   `json:"resource_name,omitempty"`
 	ResourceDocumentation string   `json:"resource_documentation,omitempty"`
@@ -26,6 +27,7 @@ type metadataConfig struct {
 	resourceName          string
 	resourceDocumentation string
 	httpClient            *http.Client
+	publicJWKS            map[string]any
 }
 
 // WithIssuer sets the authorization server issuer URL.
@@ -51,6 +53,13 @@ func WithServiceDocumentationURL(docURL string) MetadataOption {
 // WithMetadataHTTPClient sets the HTTP client used to fetch upstream authorization server metadata.
 func WithMetadataHTTPClient(c *http.Client) MetadataOption {
 	return func(cfg *metadataConfig) { cfg.httpClient = c }
+}
+
+// WithPublicJWKS serves the given JWKS document (e.g. from WebIdentityCredential.PublicJWKS())
+// at /.well-known/jwks.json, so an authorization server can fetch this resource's public keys
+// to verify its private_key_jwt client assertions. When unset, the route is not registered.
+func WithPublicJWKS(jwks map[string]any) MetadataOption {
+	return func(cfg *metadataConfig) { cfg.publicJWKS = jwks }
 }
 
 // AuthMetadataHandler returns an http.Handler that serves both
@@ -95,6 +104,11 @@ func AuthMetadataHandler(opts ...MetadataOption) http.Handler {
 		}
 		if cfg.issuer != "" {
 			metadata.AuthorizationServers = []string{cfg.issuer}
+		}
+		// When this server publishes its JWKS, advertise its location (RFC 9728 jwks_uri)
+		// so the one WithPublicJWKS option both serves and advertises, as Python couples them.
+		if cfg.publicJWKS != nil {
+			metadata.JWKSURI = baseURL + "/.well-known/jwks.json"
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -153,6 +167,14 @@ func AuthMetadataHandler(opts ...MetadataOption) http.Handler {
 
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(metadata)
+		})
+	}
+
+	if cfg.publicJWKS != nil {
+		mux.HandleFunc("GET /.well-known/jwks.json", func(w http.ResponseWriter, _ *http.Request) {
+			setCORSHeaders(w)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(cfg.publicJWKS)
 		})
 	}
 
