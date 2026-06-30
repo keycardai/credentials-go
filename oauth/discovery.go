@@ -92,7 +92,7 @@ func FetchAuthorizationServerMetadata(ctx context.Context, issuer string, opts .
 
 	// Validate the response issuer matches the requested issuer (RFC 8414 section 3.3),
 	// ignoring a trailing slash.
-	if strings.TrimRight(metadata.Issuer, "/") != issuer {
+	if strings.TrimRight(metadata.Issuer, "/") != strings.TrimRight(issuer, "/") {
 		return nil, &IssuerMismatchError{
 			Message: fmt.Sprintf("authorization server issuer %q does not match requested issuer %q", metadata.Issuer, issuer),
 		}

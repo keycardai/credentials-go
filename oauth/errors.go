@@ -98,12 +98,20 @@ func (e *IssuerMismatchError) Error() string { return e.Message }
 func (*IssuerMismatchError) keycardError()   {}
 
 // JWKSDiscoveryError indicates the JWKS URI could not be resolved from the issuer's
-// authorization server metadata.
+// authorization server metadata. Err carries the underlying cause (e.g. a discovery
+// fetch failure or an *IssuerMismatchError) for errors.Is/errors.As.
 type JWKSDiscoveryError struct {
 	Message string
+	Err     error
 }
 
-func (e *JWKSDiscoveryError) Error() string { return e.Message }
+func (e *JWKSDiscoveryError) Error() string {
+	if e.Err != nil {
+		return e.Message + ": " + e.Err.Error()
+	}
+	return e.Message
+}
+func (e *JWKSDiscoveryError) Unwrap() error { return e.Err }
 func (*JWKSDiscoveryError) keycardError()   {}
 
 // JWKSUriValidationError indicates the discovered JWKS URI failed validation, such as
@@ -115,12 +123,21 @@ type JWKSUriValidationError struct {
 func (e *JWKSUriValidationError) Error() string { return e.Message }
 func (*JWKSUriValidationError) keycardError()   {}
 
-// JWKSFetchError indicates the JWKS document could not be fetched or decoded.
+// JWKSFetchError indicates the JWKS document could not be fetched or decoded. Err
+// carries the underlying transport or decode cause (e.g. context.DeadlineExceeded) for
+// errors.Is/errors.As.
 type JWKSFetchError struct {
 	Message string
+	Err     error
 }
 
-func (e *JWKSFetchError) Error() string { return e.Message }
+func (e *JWKSFetchError) Error() string {
+	if e.Err != nil {
+		return e.Message + ": " + e.Err.Error()
+	}
+	return e.Message
+}
+func (e *JWKSFetchError) Unwrap() error { return e.Err }
 func (*JWKSFetchError) keycardError()   {}
 
 // JWKSKeyNotFoundError indicates no key matching the requested key ID was present in

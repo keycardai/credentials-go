@@ -188,7 +188,7 @@ func (k *JWKSOAuthKeyring) resolveJWKSURI(ctx context.Context, issuer string) (s
 		metadata, err := FetchAuthorizationServerMetadata(fetchCtx, issuer,
 			WithDiscoveryHTTPClient(k.cfg.httpClient))
 		if err != nil {
-			return nil, &JWKSDiscoveryError{Message: fmt.Sprintf("discovering JWKS URI for %q: %v", issuer, err)}
+			return nil, &JWKSDiscoveryError{Message: fmt.Sprintf("discovering JWKS URI for %q", issuer), Err: err}
 		}
 
 		if metadata.JWKSURI == "" {
@@ -227,7 +227,7 @@ func (k *JWKSOAuthKeyring) resolveKey(ctx context.Context, issuer, kid, jwksURI,
 
 		resp, err := k.cfg.httpClient.Do(req)
 		if err != nil {
-			return nil, &JWKSFetchError{Message: fmt.Sprintf("fetching JWKS from %q: %v", jwksURI, err)}
+			return nil, &JWKSFetchError{Message: fmt.Sprintf("fetching JWKS from %q", jwksURI), Err: err}
 		}
 		defer resp.Body.Close()
 
@@ -237,7 +237,7 @@ func (k *JWKSOAuthKeyring) resolveKey(ctx context.Context, issuer, kid, jwksURI,
 
 		var jwkSet jwkSetJSON
 		if err := json.NewDecoder(resp.Body).Decode(&jwkSet); err != nil {
-			return nil, &JWKSFetchError{Message: fmt.Sprintf("decoding JWKS from %q: %v", jwksURI, err)}
+			return nil, &JWKSFetchError{Message: fmt.Sprintf("decoding JWKS from %q", jwksURI), Err: err}
 		}
 
 		jwk, err := findKey(jwkSet.Keys, kid)

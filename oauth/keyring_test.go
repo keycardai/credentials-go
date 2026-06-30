@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -189,6 +190,80 @@ func TestJWKSOAuthKeyring_Invalidate(t *testing.T) {
 
 	if fetchCount != 2 {
 		t.Errorf("JWKS should be fetched twice after invalidation, got %d", fetchCount)
+	}
+}
+
+// A JWKS fetch failure must preserve its cause so callers can errors.Is the transport
+// error (e.g. a timeout) and errors.As the typed *JWKSFetchError.
+func TestJWKSOAuthKeyring_FetchErrorPreservesCause(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"issuer":   "http://" + r.Host,
+				"jwks_uri": "http://" + r.Host + "/.well-known/jwks.json",
+			})
+		case "/.well-known/jwks.json":
+			// Block past the fetch timeout so the JWKS fetch context expires.
+			select {
+			case <-time.After(2 * time.Second):
+			case <-r.Context().Done():
+			}
+		}
+	}))
+	defer server.Close()
+
+	keyring := NewJWKSOAuthKeyring(
+		WithFetchTimeout(100*time.Millisecond),
+		WithKeyringHTTPClient(server.Client()),
+	)
+
+	_, err := keyring.Key(context.Background(), server.URL, "test-key-1")
+	if err == nil {
+		t.Fatal("expected a fetch error")
+	}
+
+	var fetchErr *JWKSFetchError
+	if !errors.As(err, &fetchErr) {
+		t.Errorf("errors.As(*JWKSFetchError): got %v", err)
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("errors.Is(context.DeadlineExceeded): cause was dropped, got %v", err)
+	}
+}
+
+// A discovery failure during key resolution must preserve its cause so a nested
+// *IssuerMismatchError remains reachable via errors.As, matching a direct discovery call.
+func TestJWKSOAuthKeyring_DiscoveryErrorPreservesIssuerMismatch(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/.well-known/oauth-authorization-server" {
+			w.Header().Set("Content-Type", "application/json")
+			// Report a different issuer than requested to trigger an IssuerMismatchError.
+			json.NewEncoder(w).Encode(map[string]string{
+				"issuer":   "https://imposter.example.com",
+				"jwks_uri": "http://" + r.Host + "/.well-known/jwks.json",
+			})
+		}
+	}))
+	defer server.Close()
+
+	keyring := NewJWKSOAuthKeyring(
+		WithKeyringHTTPClient(server.Client()),
+	)
+
+	_, err := keyring.Key(context.Background(), server.URL, "test-key-1")
+	if err == nil {
+		t.Fatal("expected a discovery error")
+	}
+
+	var discErr *JWKSDiscoveryError
+	if !errors.As(err, &discErr) {
+		t.Errorf("errors.As(*JWKSDiscoveryError): got %v", err)
+	}
+	var mismatch *IssuerMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Errorf("errors.As(*IssuerMismatchError): nested cause was dropped, got %v", err)
 	}
 }
 

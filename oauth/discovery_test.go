@@ -5,8 +5,41 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 )
+
+// knownASMetadataFields must stay in sync with the json-tagged fields of
+// AuthorizationServerMetadata: a typed field missing from the list would be duplicated
+// into Extra, and a stale entry would silently strip a field that no longer exists.
+func TestKnownASMetadataFieldsMatchStruct(t *testing.T) {
+	tagged := map[string]bool{}
+	rt := reflect.TypeOf(AuthorizationServerMetadata{})
+	for i := 0; i < rt.NumField(); i++ {
+		name := strings.Split(rt.Field(i).Tag.Get("json"), ",")[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		tagged[name] = true
+	}
+
+	known := map[string]bool{}
+	for _, f := range knownASMetadataFields {
+		known[f] = true
+	}
+
+	for name := range tagged {
+		if !known[name] {
+			t.Errorf("struct json field %q is missing from knownASMetadataFields; it would leak into Extra", name)
+		}
+	}
+	for name := range known {
+		if !tagged[name] {
+			t.Errorf("knownASMetadataFields entry %q has no matching struct json tag", name)
+		}
+	}
+}
 
 func TestFetchAuthorizationServerMetadata(t *testing.T) {
 	metadata := AuthorizationServerMetadata{
