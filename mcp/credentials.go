@@ -123,7 +123,9 @@ func (c *ClientSecretCredential) PrepareTokenExchangeRequest(_ context.Context, 
 
 // WebIdentityCredential implements ApplicationCredential using RFC 7523 private_key_jwt.
 type WebIdentityCredential struct {
-	keyManager *PrivateKeyManager
+	keyManager     *PrivateKeyManager
+	clientID       string
+	audienceConfig string
 
 	bootstrapOnce sync.Once
 	bootstrapErr  error
@@ -133,10 +135,12 @@ type WebIdentityCredential struct {
 type WebIdentityOption func(*webIdentityConfig)
 
 type webIdentityConfig struct {
-	serverName string
-	storage    PrivateKeyStorage
-	storageDir string
-	keyID      string
+	serverName     string
+	storage        PrivateKeyStorage
+	storageDir     string
+	keyID          string
+	clientID       string
+	audienceConfig string
 }
 
 // WithServerName sets the server name (used to derive key ID if not set).
@@ -159,20 +163,62 @@ func WithKeyID(kid string) WebIdentityOption {
 	return func(cfg *webIdentityConfig) { cfg.keyID = kid }
 }
 
+// WithClientID sets the registered OAuth client id used as the assertion's iss and sub
+// claims. A request-time resource_client_id (from the exchange auth context) overrides it.
+// The client id is required to prepare a token exchange (there is no key-id fallback). It
+// is effectively mandatory when the credential is used with AuthProvider, which does not
+// supply resource_client_id at request time; NewAuthProvider rejects a WebIdentity
+// credential built without it.
+func WithClientID(clientID string) WebIdentityOption {
+	return func(cfg *webIdentityConfig) { cfg.clientID = clientID }
+}
+
+// WithAudienceConfig overrides the assertion audience. When unset, the audience is the
+// authorization server's token endpoint. (The per-zone audience map is part of the
+// multi-zone effort; this is the single-audience override.)
+func WithAudienceConfig(audience string) WebIdentityOption {
+	return func(cfg *webIdentityConfig) { cfg.audienceConfig = audience }
+}
+
 var nonAlphanumericRegex = regexp.MustCompile(`[^a-zA-Z0-9\-_]`)
+
+const (
+	defaultWebIdentityStorageDir = "./server_keys"
+	legacyWebIdentityStorageDir  = "./mcp_keys"
+)
+
+// resolveWebIdentityStorageDir returns the default key storage directory: ./server_keys,
+// falling back to the legacy ./mcp_keys when ./server_keys does not exist but ./mcp_keys does.
+func resolveWebIdentityStorageDir() string {
+	return chooseStorageDir(defaultWebIdentityStorageDir, legacyWebIdentityStorageDir)
+}
+
+func chooseStorageDir(defaultDir, legacyDir string) string {
+	if !dirExists(defaultDir) && dirExists(legacyDir) {
+		return legacyDir
+	}
+	return defaultDir
+}
+
+func dirExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
+}
 
 // NewWebIdentity creates a new WebIdentityCredential with the given options.
 func NewWebIdentity(opts ...WebIdentityOption) *WebIdentityCredential {
-	cfg := webIdentityConfig{
-		storageDir: "./mcp_keys",
-	}
+	cfg := webIdentityConfig{}
 	for _, opt := range opts {
 		opt(&cfg)
 	}
 
 	storage := cfg.storage
 	if storage == nil {
-		storage = NewFilePrivateKeyStorage(cfg.storageDir)
+		dir := cfg.storageDir
+		if dir == "" {
+			dir = resolveWebIdentityStorageDir()
+		}
+		storage = NewFilePrivateKeyStorage(dir)
 	}
 
 	keyID := cfg.keyID
@@ -184,7 +230,9 @@ func NewWebIdentity(opts ...WebIdentityOption) *WebIdentityCredential {
 	}
 
 	return &WebIdentityCredential{
-		keyManager: NewPrivateKeyManager(storage, keyID),
+		keyManager:     NewPrivateKeyManager(storage, keyID),
+		clientID:       cfg.clientID,
+		audienceConfig: cfg.audienceConfig,
 	}
 }
 
@@ -207,19 +255,29 @@ func (w *WebIdentityCredential) PrepareTokenExchangeRequest(ctx context.Context,
 		return nil, fmt.Errorf("bootstrapping identity: %w", err)
 	}
 
-	issuer := w.keyManager.ClientID()
+	// iss and sub are the registered OAuth client id: a request-time resource_client_id
+	// overrides the configured client id. There is no key-id fallback (RFC 7523).
+	clientID := w.clientID
 	if opts != nil && opts.AuthInfo != nil {
-		if resourceClientID, ok := opts.AuthInfo["resource_client_id"]; ok {
-			issuer = resourceClientID
+		if rcid, ok := opts.AuthInfo["resource_client_id"]; ok && rcid != "" {
+			clientID = rcid
 		}
 	}
-
-	audience := issuer
-	if opts != nil && opts.TokenEndpoint != "" {
-		audience = opts.TokenEndpoint
+	if clientID == "" {
+		return nil, &WebIdentityConfigurationError{Message: "client id is required for the assertion: set WithClientID or supply resource_client_id in the request auth context"}
 	}
 
-	assertion, err := w.keyManager.CreateClientAssertion(ctx, issuer, audience)
+	// aud is the audience override when set, otherwise the authorization server's token
+	// endpoint. There is no issuer fallback.
+	audience := w.audienceConfig
+	if audience == "" && opts != nil {
+		audience = opts.TokenEndpoint
+	}
+	if audience == "" {
+		return nil, &WebIdentityConfigurationError{Message: "token endpoint is required for the assertion audience"}
+	}
+
+	assertion, err := w.keyManager.CreateClientAssertion(ctx, clientID, audience)
 	if err != nil {
 		return nil, fmt.Errorf("creating client assertion: %w", err)
 	}

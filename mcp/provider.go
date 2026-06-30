@@ -30,6 +30,11 @@ const (
 // NewAccessContext creates a new empty AccessContext.
 func NewAccessContext() *AccessContext { return oauth.NewAccessContext() }
 
+// NewAccessContextWithTokens creates an AccessContext pre-seeded with tokens, keyed by resource.
+func NewAccessContextWithTokens(tokens map[string]*oauth.TokenResponse) *AccessContext {
+	return oauth.NewAccessContextWithTokens(tokens)
+}
+
 // AuthProviderOption configures an AuthProvider.
 type AuthProviderOption func(*authProviderConfig)
 
@@ -91,6 +96,15 @@ func NewAuthProvider(opts ...AuthProviderOption) (*AuthProvider, error) {
 	}
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+
+	// A WebIdentity credential needs a client id for its assertion, and the provider has
+	// no way to supply one at request time (it never sets resource_client_id). Without it
+	// every exchange would fail with a config error, so fail loudly at construction.
+	if wi, ok := cfg.applicationCredential.(*WebIdentityCredential); ok && wi.clientID == "" {
+		return nil, &AuthProviderConfigurationError{
+			Message: "WebIdentity credential requires a client id: pass mcp.WithClientID to NewWebIdentity",
+		}
 	}
 
 	p := &AuthProvider{
