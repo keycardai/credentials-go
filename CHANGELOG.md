@@ -1,3 +1,39 @@
+## v0.10.0 (2026-06-30)
+
+
+- feat(a2a): add agent-to-agent delegation client (ECO-95) (#24)
+- * feat(a2a): add agent-to-agent delegation client (ECO-95)
+- Adds the a2a package implementing Keycard's agent-to-agent delegation
+contract: discover a target agent's card, exchange the inbound user token
+for one scoped to the target (RFC 8693, authenticated with the calling
+agent's own credential), and invoke the target's JSON-RPC endpoint with the
+exchanged token. The user remains the subject at each hop; the authorization
+server records the calling agent in the token's act chain. This mirrors the
+Python (keycardai-a2a) and TypeScript (@keycardai/a2a) delegation surface.
+- - ServiceDiscovery: agent-card discovery at /.well-known/agent-card.json
+  with a TTL cache (default 15 minutes) and on-demand refresh; validates that
+  the card carries a name.
+- DelegationClient.Invoke: discover, exchange, invoke. Surfaces discovery,
+  exchange (OAuth), and JSON-RPC invocation failures as distinct error types,
+  and does not invoke the target when the exchange fails.
+- Conformance tests for the spec's five Testing cases, a runnable example
+  (examples/a2a), and a go test-verified godoc example.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * fix(a2a): per-call invoke timeout, route discovery via the client, reject empty results
+- Addresses the #24 review:
+- WithInvokeTimeout bounds a whole Invoke (discovery, exchange, invocation) via the
+  context, independent of any HTTP client timeout, so it still applies when a caller
+  supplies an http.Client with no Timeout. Restores parity with the TS per-invoke timeout.
+- A caller-supplied WithHTTPClient now also governs agent-card discovery unless an
+  explicit ServiceDiscovery is provided.
+- ServiceDiscovery deduplicates concurrent first-time lookups with singleflight, matching
+  the oauth keyring.
+- A JSON-RPC result carrying no message is now an InvocationError rather than a silent
+  empty success.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- ---------
+- Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
 ## v0.9.0 (2026-06-30)
 
 
