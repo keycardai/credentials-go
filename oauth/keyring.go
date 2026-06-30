@@ -75,6 +75,7 @@ type jwksKeyringConfig struct {
 	keyTTL       time.Duration
 	discoveryTTL time.Duration
 	fetchTimeout time.Duration
+	maxKeyCache  int
 	httpClient   *http.Client
 }
 
@@ -96,6 +97,13 @@ func WithFetchTimeout(d time.Duration) JWKSOAuthKeyringOption {
 // WithKeyringHTTPClient sets the HTTP client used for JWKS fetches.
 func WithKeyringHTTPClient(c *http.Client) JWKSOAuthKeyringOption {
 	return func(cfg *jwksKeyringConfig) { cfg.httpClient = c }
+}
+
+// WithMaxKeyCacheSize bounds the number of cached public keys. When the cache grows
+// past this size an entry is evicted on the next insert (eviction order is unspecified).
+// A value <= 0 disables the bound. Default: 256.
+func WithMaxKeyCacheSize(n int) JWKSOAuthKeyringOption {
+	return func(cfg *jwksKeyringConfig) { cfg.maxKeyCache = n }
 }
 
 type cacheEntry[T any] struct {
@@ -125,6 +133,7 @@ func NewJWKSOAuthKeyring(opts ...JWKSOAuthKeyringOption) *JWKSOAuthKeyring {
 		keyTTL:       5 * time.Minute,
 		discoveryTTL: 1 * time.Hour,
 		fetchTimeout: 10 * time.Second,
+		maxKeyCache:  256,
 		httpClient:   http.DefaultClient,
 	}
 	for _, opt := range opts {
@@ -179,11 +188,11 @@ func (k *JWKSOAuthKeyring) resolveJWKSURI(ctx context.Context, issuer string) (s
 		metadata, err := FetchAuthorizationServerMetadata(fetchCtx, issuer,
 			WithDiscoveryHTTPClient(k.cfg.httpClient))
 		if err != nil {
-			return nil, fmt.Errorf("discovering JWKS URI for %q: %w", issuer, err)
+			return nil, &JWKSDiscoveryError{Message: fmt.Sprintf("discovering JWKS URI for %q", issuer), Err: err}
 		}
 
 		if metadata.JWKSURI == "" {
-			return nil, fmt.Errorf("no JWKS URI available for %q", issuer)
+			return nil, &JWKSDiscoveryError{Message: fmt.Sprintf("no JWKS URI available for %q", issuer)}
 		}
 
 		if err := assertSameOrigin(issuer, metadata.JWKSURI); err != nil {
@@ -218,22 +227,22 @@ func (k *JWKSOAuthKeyring) resolveKey(ctx context.Context, issuer, kid, jwksURI,
 
 		resp, err := k.cfg.httpClient.Do(req)
 		if err != nil {
-			return nil, fmt.Errorf("fetching JWKS from %q: %w", jwksURI, err)
+			return nil, &JWKSFetchError{Message: fmt.Sprintf("fetching JWKS from %q", jwksURI), Err: err}
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("JWKS endpoint %q returned HTTP %d", jwksURI, resp.StatusCode)
+			return nil, &JWKSFetchError{Message: fmt.Sprintf("JWKS endpoint %q returned HTTP %d", jwksURI, resp.StatusCode)}
 		}
 
 		var jwkSet jwkSetJSON
 		if err := json.NewDecoder(resp.Body).Decode(&jwkSet); err != nil {
-			return nil, fmt.Errorf("decoding JWKS: %w", err)
+			return nil, &JWKSFetchError{Message: fmt.Sprintf("decoding JWKS from %q", jwksURI), Err: err}
 		}
 
 		jwk, err := findKey(jwkSet.Keys, kid)
 		if err != nil {
-			return nil, fmt.Errorf("failed to find key %q of %q: %w", kid, issuer, err)
+			return nil, &JWKSKeyNotFoundError{Message: fmt.Sprintf("key %q not found for issuer %q", kid, issuer)}
 		}
 
 		pubKey, err := importJWK(jwk)
@@ -245,6 +254,21 @@ func (k *JWKSOAuthKeyring) resolveKey(ctx context.Context, issuer, kid, jwksURI,
 		k.keyCache[cacheKey] = cacheEntry[crypto.PublicKey]{
 			value:     pubKey,
 			expiresAt: time.Now().Add(k.cfg.keyTTL),
+		}
+		// Bound the key cache: once over the configured size, evict entries other than
+		// the one just inserted. Eviction order is unspecified (the spec permits this).
+		for k.cfg.maxKeyCache > 0 && len(k.keyCache) > k.cfg.maxKeyCache {
+			evicted := false
+			for old := range k.keyCache {
+				if old != cacheKey {
+					delete(k.keyCache, old)
+					evicted = true
+					break
+				}
+			}
+			if !evicted {
+				break
+			}
 		}
 		k.mu.Unlock()
 
@@ -294,7 +318,7 @@ func assertSameOrigin(issuer, jwksURI string) error {
 	jwksOrigin := jwksURL.Scheme + "://" + jwksURL.Host
 
 	if issuerOrigin != jwksOrigin {
-		return fmt.Errorf("JWKS URI origin %q does not match issuer origin %q for %q", jwksOrigin, issuerOrigin, issuer)
+		return &JWKSUriValidationError{Message: fmt.Sprintf("JWKS URI origin %q does not match issuer origin %q for %q", jwksOrigin, issuerOrigin, issuer)}
 	}
 	return nil
 }

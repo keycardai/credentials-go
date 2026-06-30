@@ -155,18 +155,8 @@ func exchangeCodeAtEndpoint(ctx context.Context, tokenEndpoint string, req Autho
 // oauthErrorFromResponse converts a non-2xx token-endpoint response into an *OAuthError
 // when the body carries an RFC 6749 §5.2 error, or a generic error otherwise.
 func oauthErrorFromResponse(resp *http.Response) error {
-	var errBody map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&errBody); err == nil {
-		if errCode, ok := errBody["error"].(string); ok {
-			oauthErr := &OAuthError{ErrorCode: errCode, Message: errCode}
-			if desc, ok := errBody["error_description"].(string); ok {
-				oauthErr.Message = desc
-			}
-			if uri, ok := errBody["error_uri"].(string); ok {
-				oauthErr.ErrorURI = uri
-			}
-			return oauthErr
-		}
+	if oauthErr := parseOAuthErrorResponse(resp); oauthErr != nil {
+		return oauthErr
 	}
 	return fmt.Errorf("token endpoint returned HTTP %d", resp.StatusCode)
 }

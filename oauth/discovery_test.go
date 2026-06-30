@@ -5,14 +5,46 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"strings"
 	"testing"
 )
 
+// knownASMetadataFields must stay in sync with the json-tagged fields of
+// AuthorizationServerMetadata: a typed field missing from the list would be duplicated
+// into Extra, and a stale entry would silently strip a field that no longer exists.
+func TestKnownASMetadataFieldsMatchStruct(t *testing.T) {
+	tagged := map[string]bool{}
+	rt := reflect.TypeOf(AuthorizationServerMetadata{})
+	for i := 0; i < rt.NumField(); i++ {
+		name := strings.Split(rt.Field(i).Tag.Get("json"), ",")[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		tagged[name] = true
+	}
+
+	known := map[string]bool{}
+	for _, f := range knownASMetadataFields {
+		known[f] = true
+	}
+
+	for name := range tagged {
+		if !known[name] {
+			t.Errorf("struct json field %q is missing from knownASMetadataFields; it would leak into Extra", name)
+		}
+	}
+	for name := range known {
+		if !tagged[name] {
+			t.Errorf("knownASMetadataFields entry %q has no matching struct json tag", name)
+		}
+	}
+}
+
 func TestFetchAuthorizationServerMetadata(t *testing.T) {
 	metadata := AuthorizationServerMetadata{
-		Issuer:            "https://auth.example.com",
-		TokenEndpoint:     "https://auth.example.com/token",
-		JWKSURI:           "https://auth.example.com/.well-known/jwks.json",
+		TokenEndpoint:         "https://auth.example.com/token",
+		JWKSURI:               "https://auth.example.com/.well-known/jwks.json",
 		AuthorizationEndpoint: "https://auth.example.com/authorize",
 	}
 
@@ -26,6 +58,8 @@ func TestFetchAuthorizationServerMetadata(t *testing.T) {
 		json.NewEncoder(w).Encode(metadata)
 	}))
 	defer server.Close()
+	// A real authorization server reports its own URL as the issuer.
+	metadata.Issuer = server.URL
 
 	result, err := FetchAuthorizationServerMetadata(context.Background(), server.URL)
 	if err != nil {

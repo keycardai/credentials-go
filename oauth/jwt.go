@@ -17,15 +17,15 @@ const DefaultLeeway = 60 * time.Second
 
 // JWTClaims represents standard JWT claims with optional extra fields.
 type JWTClaims struct {
-	Issuer   string   `json:"iss,omitempty"`
-	Subject  string   `json:"sub,omitempty"`
-	Audience []string `json:"aud,omitempty"`
-	Expiry   int64    `json:"exp,omitempty"`
-	NotBefore int64   `json:"nbf,omitempty"`
-	IssuedAt int64    `json:"iat,omitempty"`
-	JWTID    string   `json:"jti,omitempty"`
-	Scope    string   `json:"scope,omitempty"`
-	ClientID string   `json:"client_id,omitempty"`
+	Issuer    string   `json:"iss,omitempty"`
+	Subject   string   `json:"sub,omitempty"`
+	Audience  []string `json:"aud,omitempty"`
+	Expiry    int64    `json:"exp,omitempty"`
+	NotBefore int64    `json:"nbf,omitempty"`
+	IssuedAt  int64    `json:"iat,omitempty"`
+	JWTID     string   `json:"jti,omitempty"`
+	Scope     string   `json:"scope,omitempty"`
+	ClientID  string   `json:"client_id,omitempty"`
 
 	// Extra holds additional claims not covered by the standard fields.
 	Extra map[string]any `json:"-"`
