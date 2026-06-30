@@ -227,3 +227,48 @@ func TestAuthMetadataHandler_CORSHeaders(t *testing.T) {
 		t.Error("missing CORS origin header")
 	}
 }
+
+func TestAuthMetadataHandler_PublicJWKS(t *testing.T) {
+	jwks := map[string]any{
+		"keys": []any{
+			map[string]any{"kty": "RSA", "kid": "server-key-1", "use": "sig", "n": "abc", "e": "AQAB"},
+		},
+	}
+	handler := AuthMetadataHandler(WithPublicJWKS(jwks))
+
+	req := httptest.NewRequest("GET", "/.well-known/jwks.json", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: got %d, want 200", rec.Code)
+	}
+	if rec.Header().Get("Access-Control-Allow-Origin") != "*" {
+		t.Error("missing CORS origin header")
+	}
+
+	var body map[string]any
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	keys, ok := body["keys"].([]any)
+	if !ok || len(keys) != 1 {
+		t.Fatalf("keys: got %v", body["keys"])
+	}
+	if kid := keys[0].(map[string]any)["kid"]; kid != "server-key-1" {
+		t.Errorf("kid: got %v", kid)
+	}
+}
+
+func TestAuthMetadataHandler_PublicJWKSOmittedByDefault(t *testing.T) {
+	handler := AuthMetadataHandler(WithIssuer("https://auth.example.com"))
+
+	req := httptest.NewRequest("GET", "/.well-known/jwks.json", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	// Without WithPublicJWKS the route is not registered, so no JWKS document is served.
+	if rec.Code == http.StatusOK {
+		t.Errorf("status: got 200, want non-200 (jwks route should not be registered without WithPublicJWKS)")
+	}
+}
