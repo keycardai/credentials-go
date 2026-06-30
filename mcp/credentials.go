@@ -53,7 +53,10 @@ type ClientSecretCredential struct {
 }
 
 // NewClientSecret creates a single-zone ClientSecretCredential. It returns a
-// ClientSecretConfigurationError if the client_id or client_secret is empty.
+// ClientSecretConfigurationError if the client_id or client_secret is empty (or only
+// whitespace). The values are used verbatim for HTTP basic auth, so callers should pass
+// them without surrounding whitespace; a padded client_id otherwise produces an opaque
+// invalid_client at the token endpoint.
 func NewClientSecret(clientID, clientSecret string) (*ClientSecretCredential, error) {
 	if strings.TrimSpace(clientID) == "" {
 		return nil, &ClientSecretConfigurationError{Message: "client_id must not be empty"}
@@ -304,7 +307,8 @@ func NewEKSWorkloadIdentity(opts ...EKSWorkloadIdentityOption) (*EKSWorkloadIden
 	data, err := os.ReadFile(tokenFilePath)
 	if err != nil {
 		return nil, &EKSWorkloadIdentityConfigurationError{
-			Message: fmt.Sprintf("error reading token file %q: %v", tokenFilePath, err),
+			Message: fmt.Sprintf("error reading token file %q", tokenFilePath),
+			Err:     err,
 		}
 	}
 	if len(strings.TrimSpace(string(data))) == 0 {
@@ -325,7 +329,7 @@ func (e *EKSWorkloadIdentityCredential) Auth(_ string) *ClientAuth {
 func (e *EKSWorkloadIdentityCredential) PrepareTokenExchangeRequest(_ context.Context, subjectToken, resource string, _ *PrepareOptions) (*oauth.TokenExchangeRequest, error) {
 	data, err := os.ReadFile(e.tokenFilePath)
 	if err != nil {
-		return nil, &EKSWorkloadIdentityRuntimeError{Message: fmt.Sprintf("reading EKS token from %q: %v", e.tokenFilePath, err)}
+		return nil, &EKSWorkloadIdentityRuntimeError{Message: fmt.Sprintf("reading EKS token from %q", e.tokenFilePath), Err: err}
 	}
 
 	eksToken := strings.TrimSpace(string(data))

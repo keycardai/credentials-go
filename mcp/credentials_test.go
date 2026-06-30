@@ -94,6 +94,13 @@ func TestNewEKSWorkloadIdentity_ConfigErrorOnMissingFile(t *testing.T) {
 	if !errors.As(err, &cfgErr) {
 		t.Fatalf("error: got %v, want EKSWorkloadIdentityConfigurationError", err)
 	}
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("errors.Is(os.ErrNotExist): cause was dropped, got %v", err)
+	}
+	var runtimeErr *EKSWorkloadIdentityRuntimeError
+	if errors.As(err, &runtimeErr) {
+		t.Error("construction failure should not be an EKSWorkloadIdentityRuntimeError")
+	}
 }
 
 func TestEKSWorkloadIdentity_RuntimeErrorAfterConstruction(t *testing.T) {
@@ -101,8 +108,9 @@ func TestEKSWorkloadIdentity_RuntimeErrorAfterConstruction(t *testing.T) {
 	// (e.g. rotated away by the platform). A read at request time must surface a runtime
 	// error, distinct from the construction-time configuration error.
 	cases := []struct {
-		name    string
-		corrupt func(t *testing.T, path string)
+		name              string
+		corrupt           func(t *testing.T, path string)
+		wantUnwrapMissing bool // the read returns os.ErrNotExist (vs an empty-but-present file)
 	}{
 		{
 			name: "file removed",
@@ -111,6 +119,7 @@ func TestEKSWorkloadIdentity_RuntimeErrorAfterConstruction(t *testing.T) {
 					t.Fatalf("removing token file: %v", err)
 				}
 			},
+			wantUnwrapMissing: true,
 		},
 		{
 			name: "file emptied",
@@ -119,6 +128,7 @@ func TestEKSWorkloadIdentity_RuntimeErrorAfterConstruction(t *testing.T) {
 					t.Fatalf("emptying token file: %v", err)
 				}
 			},
+			wantUnwrapMissing: false,
 		},
 	}
 
@@ -140,6 +150,13 @@ func TestEKSWorkloadIdentity_RuntimeErrorAfterConstruction(t *testing.T) {
 			var runtimeErr *EKSWorkloadIdentityRuntimeError
 			if !errors.As(err, &runtimeErr) {
 				t.Fatalf("error: got %v, want EKSWorkloadIdentityRuntimeError", err)
+			}
+			var cfgErr *EKSWorkloadIdentityConfigurationError
+			if errors.As(err, &cfgErr) {
+				t.Error("a read failure at request time should not be an EKSWorkloadIdentityConfigurationError")
+			}
+			if tc.wantUnwrapMissing && !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("errors.Is(os.ErrNotExist): cause was dropped, got %v", err)
 			}
 		})
 	}
