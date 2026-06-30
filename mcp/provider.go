@@ -30,6 +30,11 @@ const (
 // NewAccessContext creates a new empty AccessContext.
 func NewAccessContext() *AccessContext { return oauth.NewAccessContext() }
 
+// NewAccessContextWithTokens creates an AccessContext pre-seeded with tokens, keyed by resource.
+func NewAccessContextWithTokens(tokens map[string]*oauth.TokenResponse) *AccessContext {
+	return oauth.NewAccessContextWithTokens(tokens)
+}
+
 // AuthProviderOption configures an AuthProvider.
 type AuthProviderOption func(*authProviderConfig)
 

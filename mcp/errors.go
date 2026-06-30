@@ -15,6 +15,17 @@ func (e *AuthProviderConfigurationError) Error() string {
 	return e.Message
 }
 
+// WebIdentityConfigurationError indicates a WebIdentity client assertion could not be
+// prepared because a required value was missing at request time: the client id (iss/sub)
+// or the token endpoint (aud).
+type WebIdentityConfigurationError struct {
+	Message string
+}
+
+func (e *WebIdentityConfigurationError) Error() string {
+	return e.Message
+}
+
 // EKSWorkloadIdentityConfigurationError indicates invalid EKS workload identity configuration
 // detected at construction (e.g. no token file path, or the file is missing or empty). Err
 // carries the underlying cause (e.g. os.ErrNotExist or os.ErrPermission from reading the

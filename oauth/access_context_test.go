@@ -2,6 +2,22 @@ package oauth
 
 import "testing"
 
+func TestNewAccessContextWithTokens(t *testing.T) {
+	ac := NewAccessContextWithTokens(map[string]*TokenResponse{
+		"res-a": {AccessToken: "ta"},
+	})
+	if ac.Status() != StatusSuccess {
+		t.Errorf("status: got %q, want success", ac.Status())
+	}
+	tok, err := ac.Access("res-a")
+	if err != nil {
+		t.Fatalf("access: %v", err)
+	}
+	if tok.AccessToken != "ta" {
+		t.Errorf("token: got %q, want ta", tok.AccessToken)
+	}
+}
+
 func TestAccessContext_MergeTokensAndErrors(t *testing.T) {
 	a := NewAccessContext()
 	a.SetToken("res-a", &TokenResponse{AccessToken: "ta"})

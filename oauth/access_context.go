@@ -49,6 +49,14 @@ func NewAccessContext() *AccessContext {
 	}
 }
 
+// NewAccessContextWithTokens creates an AccessContext pre-seeded with tokens, keyed by
+// resource. It mirrors the seed-token constructor in the Python and TypeScript SDKs.
+func NewAccessContextWithTokens(tokens map[string]*TokenResponse) *AccessContext {
+	ac := NewAccessContext()
+	ac.SetBulkTokens(tokens)
+	return ac
+}
+
 // SetToken sets a successful token for a resource (clears any error for that resource).
 func (ac *AccessContext) SetToken(resource string, token *TokenResponse) {
 	ac.tokens[resource] = token
