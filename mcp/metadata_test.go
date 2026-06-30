@@ -260,6 +260,38 @@ func TestAuthMetadataHandler_PublicJWKS(t *testing.T) {
 	}
 }
 
+func TestAuthMetadataHandler_AdvertisesJWKSURI(t *testing.T) {
+	jwks := map[string]any{"keys": []any{}}
+	handler := AuthMetadataHandler(WithIssuer("https://zone.example.com"), WithPublicJWKS(jwks))
+
+	req := httptest.NewRequest("GET", "/.well-known/oauth-protected-resource", nil)
+	req.Host = "mcp.example.com"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	var metadata ProtectedResourceMetadata
+	if err := json.NewDecoder(rec.Body).Decode(&metadata); err != nil {
+		t.Fatalf("decoding: %v", err)
+	}
+	if metadata.JWKSURI != "http://mcp.example.com/.well-known/jwks.json" {
+		t.Errorf("jwks_uri: got %q, want the served JWKS location", metadata.JWKSURI)
+	}
+}
+
+func TestAuthMetadataHandler_JWKSURIOmittedWithoutPublicJWKS(t *testing.T) {
+	handler := AuthMetadataHandler(WithIssuer("https://zone.example.com"))
+
+	req := httptest.NewRequest("GET", "/.well-known/oauth-protected-resource", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	var metadata ProtectedResourceMetadata
+	json.NewDecoder(rec.Body).Decode(&metadata)
+	if metadata.JWKSURI != "" {
+		t.Errorf("jwks_uri: got %q, want empty when no JWKS is published", metadata.JWKSURI)
+	}
+}
+
 func TestAuthMetadataHandler_PublicJWKSOmittedByDefault(t *testing.T) {
 	handler := AuthMetadataHandler(WithIssuer("https://auth.example.com"))
 
