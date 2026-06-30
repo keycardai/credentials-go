@@ -1,3 +1,61 @@
+## v0.12.0 (2026-06-30)
+
+
+- feat(mcp)!: move AccessContext to oauth and add the Grant decorator (ECO-94) (#26)
+- * feat(mcp)!: move AccessContext to oauth and add the Grant decorator (ECO-94)
+- Moves AccessContext, AccessContextStatus, ErrorDetail, and ResourceAccessError
+from mcp to the oauth package (oauth/access_context.go), so the oauth client
+surface can return them without importing mcp. The mcp package re-exports all of
+them as type aliases, so existing mcp.AccessContext usage keeps compiling.
+Matches the Python/TS layout, where AccessContext lives in oauth. Adds
+AccessContext.Merge for stacked grants.
+- Adds grant-decorator options to AuthProvider.Grant:
+- WithUserIdentifier(func(*http.Request) (string, error)): impersonate the
+  resolved user (RFC 8693 substitute-user, via oauth.Impersonate) per resource
+  instead of exchanging the caller's token; a resolver error fails closed.
+- WithRequestScopes(...): scopes requested for each resource's token.
+Stacked Grant middlewares now merge into a single AccessContext on the request.
+- BREAKING CHANGE: AuthProvider.Grant's signature is now
+Grant(resources []string, opts ...GrantOption) (was Grant(resources ...string)),
+to carry the options. The two examples are updated.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * fix(mcp): steer impersonation to the verified subject and align grant merge with TS
+- Addresses the #26 review:
+- Expose AuthInfo.Subject (the verified sub claim) and steer WithUserIdentifier's
+  doc and example to it, so the impersonation subject is derived from the verified
+  token, not unverified request data (otherwise an impersonation footgun).
+- AccessContext.Merge is now last-wins on the global error, matching the TypeScript
+  convention for stacked grants.
+- Document that WithRequestScopes is flat: caller scopes win over the credential's,
+  and stacking single-resource grants gives per-resource scopes.
+- Assert requestScopes reach the impersonation exchange; add AccessContext.Merge tests.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * feat(mcp): support per-resource request scopes (WithRequestScopesByResource)
+- Adds WithRequestScopesByResource(map[string][]string) so a single multi-resource
+Grant can request different scopes per resource, with WithRequestScopes as the
+fallback for resources absent from the map. Closes the per-resource half of the
+TypeScript requestScopes surface (string | string[] | Record<resource, scopes>)
+rather than leaving it to the stack-single-resource-grants workaround.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- ---------
+- Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- feat(mcp): serve public JWKS at /.well-known/jwks.json (ECO-94) (#25)
+- * feat(mcp): serve public JWKS at /.well-known/jwks.json (ECO-94)
+- Add a WithPublicJWKS metadata option that serves a JWKS document (e.g. from
+WebIdentityCredential.PublicJWKS()) at /.well-known/jwks.json with CORS headers,
+so an authorization server can fetch the resource's public keys to verify its
+private_key_jwt client assertions. The route is only registered when the option
+is set. Completes the oauth-metadata-endpoints item of ECO-94.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * fix(mcp): advertise jwks_uri in protected-resource metadata
+- When WithPublicJWKS is set, the protected-resource metadata now also advertises
+the JWKS location via the RFC 9728 jwks_uri field (origin + /.well-known/jwks.json),
+so the one option both serves and advertises the JWKS, matching how Python couples
+them. Addresses the #25 review.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- ---------
+- Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
 ## v0.11.0 (2026-06-30)
 
 
