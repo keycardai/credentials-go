@@ -75,7 +75,8 @@ func (ac *AccessContext) SetError(detail ErrorDetail) {
 
 // Merge folds another AccessContext into this one, for stacked grants. Tokens and
 // resource errors from other are applied entry by entry (preserving the token-or-error
-// invariant per resource); other's global error is adopted only if this one has none.
+// invariant per resource); other's global error overwrites this one (last-wins, matching
+// the TypeScript convention).
 func (ac *AccessContext) Merge(other *AccessContext) {
 	if other == nil {
 		return
@@ -86,7 +87,7 @@ func (ac *AccessContext) Merge(other *AccessContext) {
 	for resource, detail := range other.resourceErrors {
 		ac.SetResourceError(resource, detail)
 	}
-	if ac.globalError == nil && other.globalError != nil {
+	if other.globalError != nil {
 		ac.globalError = other.globalError
 	}
 }

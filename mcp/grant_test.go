@@ -110,6 +110,7 @@ func TestGrant_UserIdentifierImpersonates(t *testing.T) {
 				resolved = true
 				return "user-42", nil
 			}),
+			WithRequestScopes("inventory.read"),
 		))
 
 	if !resolved {
@@ -119,15 +120,19 @@ func TestGrant_UserIdentifierImpersonates(t *testing.T) {
 		t.Fatalf("status: got %q, want success", ac.Status())
 	}
 
-	// Impersonation performs the exchange as a substitute-user, not the caller's token.
-	sawSubstituteUser := false
+	// Impersonation performs the exchange as a substitute-user (not the caller's token),
+	// and the requested scopes reach that exchange.
+	var substituteUser url.Values
 	for _, f := range zone.tokenForms() {
 		if f.Get("subject_token_type") == oauth.SubstituteUserTokenType {
-			sawSubstituteUser = true
+			substituteUser = f
 		}
 	}
-	if !sawSubstituteUser {
-		t.Errorf("expected a substitute-user exchange (impersonation); forms=%v", zone.tokenForms())
+	if substituteUser == nil {
+		t.Fatalf("expected a substitute-user exchange (impersonation); forms=%v", zone.tokenForms())
+	}
+	if got := substituteUser.Get("scope"); got != "inventory.read" {
+		t.Errorf("impersonation scope: got %q, want %q", got, "inventory.read")
 	}
 }
 

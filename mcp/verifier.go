@@ -8,8 +8,11 @@ import (
 
 // AuthInfo contains information about an authenticated request.
 type AuthInfo struct {
-	Token     string
-	ClientID  string
+	Token    string
+	ClientID string
+	// Subject is the verified token's sub claim: the authenticated user. Use it as the
+	// trusted identity for impersonation (see WithUserIdentifier).
+	Subject   string
 	Scopes    []string
 	Resource  string
 	ExpiresAt int64
@@ -68,6 +71,7 @@ func (v *JWTOAuthTokenVerifier) VerifyAccessToken(ctx context.Context, token str
 	info := &AuthInfo{
 		Token:    token,
 		ClientID: claims.ClientID,
+		Subject:  claims.Subject,
 		Scopes:   parseScopes(claims.Scope),
 		Issuer:   claims.Issuer,
 	}

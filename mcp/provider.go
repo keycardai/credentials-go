@@ -135,11 +135,22 @@ type grantConfig struct {
 // When set, Grant impersonates that user (RFC 8693 substitute-user) for each resource
 // rather than exchanging the caller's own token. The resolver runs once per request; if it
 // returns an error the grant fails closed with a global error on the AccessContext.
+//
+// SECURITY: the resolved identifier becomes the subject of a real token minted with the
+// agent's own credential. Derive it from the verified token, never from unverified request
+// data such as a header, query parameter, or body field:
+//
+//	mcp.WithUserIdentifier(func(r *http.Request) (string, error) {
+//		return mcp.AuthInfoFromRequest(r).Subject, nil
+//	})
 func WithUserIdentifier(fn func(*http.Request) (string, error)) GrantOption {
 	return func(c *grantConfig) { c.userIdentifier = fn }
 }
 
-// WithRequestScopes sets the scopes requested for each resource's exchanged token.
+// WithRequestScopes sets the scopes requested for each resource's exchanged token. The
+// same scopes apply to every resource in the grant and take precedence over any scope the
+// application credential sets. To request different scopes per resource, stack a
+// single-resource Grant for each.
 func WithRequestScopes(scopes ...string) GrantOption {
 	return func(c *grantConfig) { c.requestScopes = scopes }
 }
