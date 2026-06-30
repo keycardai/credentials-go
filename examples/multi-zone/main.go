@@ -33,10 +33,13 @@ func main() {
 
 	// One credential carrying both zones' client credentials, keyed by zone URL. It is
 	// self-describing: holding more than one zone makes the provider multi-zone.
-	credential := mcp.NewMultiZoneClientSecret(map[string]mcp.ClientAuth{
+	credential, err := mcp.NewMultiZoneClientSecret(map[string]mcp.ClientAuth{
 		aURL: {ClientID: os.Getenv("KEYCARD_ZONE_A_CLIENT_ID"), ClientSecret: os.Getenv("KEYCARD_ZONE_A_CLIENT_SECRET")},
 		bURL: {ClientID: os.Getenv("KEYCARD_ZONE_B_CLIENT_ID"), ClientSecret: os.Getenv("KEYCARD_ZONE_B_CLIENT_SECRET")},
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// The verifier trusts tokens from either zone; the token's iss selects the zone and
 	// its JWKS. A token from any other issuer is rejected.

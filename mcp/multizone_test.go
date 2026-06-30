@@ -16,6 +16,28 @@ import (
 	"github.com/keycardai/credentials-go/oauth"
 )
 
+// mustMultiZone builds a multi-zone client-secret credential and fails the test if
+// construction is rejected.
+func mustMultiZone(t *testing.T, zones map[string]ClientAuth) *ClientSecretCredential {
+	t.Helper()
+	cred, err := NewMultiZoneClientSecret(zones)
+	if err != nil {
+		t.Fatalf("NewMultiZoneClientSecret: %v", err)
+	}
+	return cred
+}
+
+// mustClientSecret builds a single-zone client-secret credential and fails the test if
+// construction is rejected.
+func mustClientSecret(t *testing.T, clientID, clientSecret string) *ClientSecretCredential {
+	t.Helper()
+	cred, err := NewClientSecret(clientID, clientSecret)
+	if err != nil {
+		t.Fatalf("NewClientSecret: %v", err)
+	}
+	return cred
+}
+
 // zoneServer is a fake authorization server for one zone: it serves discovery and a
 // /token endpoint that records the Basic-auth client id it received, so tests can
 // assert that the exchange used the right zone's credential.
@@ -104,7 +126,7 @@ func serveWithToken(h http.Handler, token string) *httptest.ResponseRecorder {
 
 // Spec row 1: a multi-zone credential is self-describing and resolves per zone.
 func TestMultiZoneClientSecret_ResolvesPerZone(t *testing.T) {
-	cred := NewMultiZoneClientSecret(map[string]ClientAuth{
+	cred := mustMultiZone(t, map[string]ClientAuth{
 		"https://zone-a.keycard.cloud": {ClientID: "client-a", ClientSecret: "secret-a"},
 		"https://zone-b.keycard.cloud": {ClientID: "client-b", ClientSecret: "secret-b"},
 	})
@@ -129,7 +151,7 @@ func TestAuthProvider_ExchangeRoutesToZoneCredential(t *testing.T) {
 	zoneA := newZoneServer(t)
 	zoneB := newZoneServer(t)
 
-	cred := NewMultiZoneClientSecret(map[string]ClientAuth{
+	cred := mustMultiZone(t, map[string]ClientAuth{
 		zoneA.URL: {ClientID: "client-a", ClientSecret: "secret-a"},
 		zoneB.URL: {ClientID: "client-b", ClientSecret: "secret-b"},
 	})
@@ -162,7 +184,7 @@ func TestAuthProvider_ExchangeRoutesToZoneCredential(t *testing.T) {
 
 // Spec row 5: a resolved zone with no configured credential fails closed.
 func TestAuthProvider_MultiZoneUnknownZoneFailsClosed(t *testing.T) {
-	cred := NewMultiZoneClientSecret(map[string]ClientAuth{
+	cred := mustMultiZone(t, map[string]ClientAuth{
 		"https://zone-a.keycard.cloud": {ClientID: "client-a", ClientSecret: "secret-a"},
 	})
 	provider, err := NewAuthProvider(WithApplicationCredential(cred))
@@ -178,7 +200,7 @@ func TestAuthProvider_MultiZoneUnknownZoneFailsClosed(t *testing.T) {
 
 // Spec row 4: a request whose zone cannot be resolved fails closed.
 func TestAuthProvider_MultiZoneUnresolvedZoneFailsClosed(t *testing.T) {
-	cred := NewMultiZoneClientSecret(map[string]ClientAuth{
+	cred := mustMultiZone(t, map[string]ClientAuth{
 		"https://zone-a.keycard.cloud": {ClientID: "client-a", ClientSecret: "secret-a"},
 	})
 	provider, err := NewAuthProvider(WithApplicationCredential(cred))
@@ -209,7 +231,7 @@ func TestAuthProvider_GrantRoutesByTokenIssuer(t *testing.T) {
 		t.Fatalf("NewJWTOAuthTokenVerifier: %v", err)
 	}
 
-	cred := NewMultiZoneClientSecret(map[string]ClientAuth{
+	cred := mustMultiZone(t, map[string]ClientAuth{
 		zoneA.URL: {ClientID: "client-a", ClientSecret: "secret-a"},
 		zoneB.URL: {ClientID: "client-b", ClientSecret: "secret-b"},
 	})
