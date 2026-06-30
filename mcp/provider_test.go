@@ -220,7 +220,7 @@ func TestAuthProvider_ExchangeTokens(t *testing.T) {
 
 	provider, err := NewAuthProvider(
 		WithZoneURL(tokenServer.URL),
-		WithApplicationCredential(NewClientSecret("client-id", "client-secret")),
+		WithApplicationCredential(mustClientSecret(t, "client-id", "client-secret")),
 	)
 	if err != nil {
 		t.Fatalf("creating provider: %v", err)

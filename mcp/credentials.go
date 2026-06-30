@@ -52,16 +52,38 @@ type ClientSecretCredential struct {
 	zones        map[string]ClientAuth // non-nil only for a multi-zone credential
 }
 
-// NewClientSecret creates a single-zone ClientSecretCredential.
-func NewClientSecret(clientID, clientSecret string) *ClientSecretCredential {
-	return &ClientSecretCredential{clientID: clientID, clientSecret: clientSecret}
+// NewClientSecret creates a single-zone ClientSecretCredential. It returns a
+// ClientSecretConfigurationError if the client_id or client_secret is empty (or only
+// whitespace). The values are used verbatim for HTTP basic auth, so callers should pass
+// them without surrounding whitespace; a padded client_id otherwise produces an opaque
+// invalid_client at the token endpoint.
+func NewClientSecret(clientID, clientSecret string) (*ClientSecretCredential, error) {
+	if strings.TrimSpace(clientID) == "" {
+		return nil, &ClientSecretConfigurationError{Message: "client_id must not be empty"}
+	}
+	if strings.TrimSpace(clientSecret) == "" {
+		return nil, &ClientSecretConfigurationError{Message: "client_secret must not be empty"}
+	}
+	return &ClientSecretCredential{clientID: clientID, clientSecret: clientSecret}, nil
 }
 
 // NewMultiZoneClientSecret creates a multi-zone ClientSecretCredential from a map of
 // zone issuer URL to that zone's client credentials. The credential is self-describing:
-// holding zone entries marks it multi-zone.
-func NewMultiZoneClientSecret(zones map[string]ClientAuth) *ClientSecretCredential {
-	return &ClientSecretCredential{zones: zones}
+// holding zone entries marks it multi-zone. It returns a ClientSecretConfigurationError
+// if the map is empty or any entry has an empty issuer, client_id, or client_secret.
+func NewMultiZoneClientSecret(zones map[string]ClientAuth) (*ClientSecretCredential, error) {
+	if len(zones) == 0 {
+		return nil, &ClientSecretConfigurationError{Message: "multi-zone credential requires at least one zone"}
+	}
+	for issuer, auth := range zones {
+		if strings.TrimSpace(issuer) == "" {
+			return nil, &ClientSecretConfigurationError{Message: "multi-zone credential has an empty zone issuer"}
+		}
+		if strings.TrimSpace(auth.ClientID) == "" || strings.TrimSpace(auth.ClientSecret) == "" {
+			return nil, &ClientSecretConfigurationError{Message: fmt.Sprintf("zone %q is missing client_id or client_secret", issuer)}
+		}
+	}
+	return &ClientSecretCredential{zones: zones}, nil
 }
 
 // Auth returns the basic-auth credentials for the given zone issuer. A single-zone
@@ -285,7 +307,8 @@ func NewEKSWorkloadIdentity(opts ...EKSWorkloadIdentityOption) (*EKSWorkloadIden
 	data, err := os.ReadFile(tokenFilePath)
 	if err != nil {
 		return nil, &EKSWorkloadIdentityConfigurationError{
-			Message: fmt.Sprintf("error reading token file %q: %v", tokenFilePath, err),
+			Message: fmt.Sprintf("error reading token file %q", tokenFilePath),
+			Err:     err,
 		}
 	}
 	if len(strings.TrimSpace(string(data))) == 0 {
@@ -306,12 +329,12 @@ func (e *EKSWorkloadIdentityCredential) Auth(_ string) *ClientAuth {
 func (e *EKSWorkloadIdentityCredential) PrepareTokenExchangeRequest(_ context.Context, subjectToken, resource string, _ *PrepareOptions) (*oauth.TokenExchangeRequest, error) {
 	data, err := os.ReadFile(e.tokenFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("reading EKS token from %q: %w", e.tokenFilePath, err)
+		return nil, &EKSWorkloadIdentityRuntimeError{Message: fmt.Sprintf("reading EKS token from %q", e.tokenFilePath), Err: err}
 	}
 
 	eksToken := strings.TrimSpace(string(data))
 	if eksToken == "" {
-		return nil, fmt.Errorf("EKS token file is empty: %s", e.tokenFilePath)
+		return nil, &EKSWorkloadIdentityRuntimeError{Message: fmt.Sprintf("EKS token file is empty: %s", e.tokenFilePath)}
 	}
 
 	return &oauth.TokenExchangeRequest{

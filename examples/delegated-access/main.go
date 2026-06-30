@@ -25,9 +25,14 @@ func main() {
 		log.Fatal("KEYCARD_ZONE_URL, KEYCARD_CLIENT_ID, and KEYCARD_CLIENT_SECRET are required")
 	}
 
+	credential, err := mcp.NewClientSecret(clientID, clientSecret)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	authProvider, err := mcp.NewAuthProvider(
 		mcp.WithZoneURL(zoneURL),
-		mcp.WithApplicationCredential(mcp.NewClientSecret(clientID, clientSecret)),
+		mcp.WithApplicationCredential(credential),
 	)
 	if err != nil {
 		log.Fatal(err)
