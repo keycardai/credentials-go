@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 )
 
 // ProtectedResourceMetadata represents OAuth Protected Resource Metadata.
@@ -54,6 +55,11 @@ func WithMetadataHTTPClient(c *http.Client) MetadataOption {
 
 // AuthMetadataHandler returns an http.Handler that serves both
 // /.well-known/oauth-protected-resource and /.well-known/oauth-authorization-server endpoints.
+//
+// An issuer (WithIssuer) is effectively required for a usable deployment: without it the
+// protected-resource metadata advertises no authorization_servers and the
+// authorization-server proxy route is not registered, leaving clients no way to discover
+// the authorization server.
 func AuthMetadataHandler(opts ...MetadataOption) http.Handler {
 	cfg := metadataConfig{}
 	for _, opt := range opts {
@@ -65,17 +71,21 @@ func AuthMetadataHandler(opts ...MetadataOption) http.Handler {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("GET /.well-known/oauth-protected-resource", func(w http.ResponseWriter, r *http.Request) {
+	// protectedResource serves the Protected Resource Metadata (RFC 9728). It is registered
+	// for both the bare well-known path (origin resource) and the path-inserted form
+	// (e.g. /.well-known/oauth-protected-resource/mcp), so a resource mounted at a sub-path
+	// advertises and resolves to its full URL rather than the bare origin.
+	protectedResource := func(w http.ResponseWriter, r *http.Request) {
 		setCORSHeaders(w)
 
 		scheme := requestScheme(r)
 		baseURL := fmt.Sprintf("%s://%s", scheme, r.Host)
 
-		path := r.URL.Path
-		if path == "/.well-known/oauth-protected-resource" {
-			path = ""
-		}
-		resource := baseURL + path
+		// The resource is the origin plus the path that follows the well-known prefix:
+		// "" for the origin resource, "/mcp" for the path-inserted form. A trailing slash
+		// (e.g. the bare path-inserted form ".../oauth-protected-resource/") normalizes to
+		// the origin so the advertised resource matches an origin-bound audience exactly.
+		resource := baseURL + strings.TrimRight(strings.TrimPrefix(r.URL.Path, "/.well-known/oauth-protected-resource"), "/")
 
 		metadata := ProtectedResourceMetadata{
 			Resource:              resource,
@@ -83,16 +93,18 @@ func AuthMetadataHandler(opts ...MetadataOption) http.Handler {
 			ResourceName:          cfg.resourceName,
 			ResourceDocumentation: cfg.resourceDocumentation,
 		}
-
-		// Handle MCP protocol version for backward compatibility
-		mcpVersion := r.Header.Get("MCP-Protocol-Version")
-		if mcpVersion == "2025-03-26" {
-			metadata.AuthorizationServers = []string{baseURL}
+		if cfg.issuer != "" {
+			metadata.AuthorizationServers = []string{cfg.issuer}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(metadata)
-	})
+	}
+	// Two routes: the exact bare path (origin resource) and the subtree for the
+	// path-inserted form (.../oauth-protected-resource/mcp). The handler derives the
+	// resource from r.URL.Path, so no path wildcard binding is needed.
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource", protectedResource)
+	mux.HandleFunc("GET /.well-known/oauth-protected-resource/", protectedResource)
 
 	if cfg.issuer != "" {
 		mux.HandleFunc("GET /.well-known/oauth-authorization-server", func(w http.ResponseWriter, r *http.Request) {
