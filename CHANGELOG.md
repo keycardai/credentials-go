@@ -1,3 +1,41 @@
+## v0.9.0 (2026-06-30)
+
+
+- feat: oauth conformance polish - discovery/token-exchange/jwks/error-model (ECO-94) (#22)
+- * feat: oauth conformance polish (discovery, token-exchange, jwks, error model)
+- Aligns the oauth package with the spec divergence tables (ECO-94):
+- - discovery: validate the response issuer matches the requested issuer
+  (RFC 8414 section 3.3, trailing slash ignored) via a typed IssuerMismatchError,
+  and preserve unknown fields on AuthorizationServerMetadata.Extra.
+- token-exchange: add TokenResponse.IDToken; default token_type to "Bearer"
+  (RFC 6750). Client-credentials and authorization-code inherit via the shared
+  deserializeTokenResponse.
+- jwks keyring: bound the key cache (WithMaxKeyCacheSize, default 256) with
+  overflow eviction; return typed JWKSDiscoveryError / JWKSUriValidationError /
+  JWKSFetchError / JWKSKeyNotFoundError instead of generic errors.
+- error model: add the KeycardError marker interface (errors.As discrimination)
+  and a single parseOAuthErrorResponse helper, replacing the RFC 6749 error
+  parsing duplicated across token-exchange, client-credentials, authorization-code,
+  and registration.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * fix(oauth): preserve error cause in JWKS errors and trim issuer on both sides
+- JWKSDiscoveryError and JWKSFetchError now carry the underlying cause via an
+Err field and Unwrap(), instead of formatting it away with %v. This restores
+errors.Is (e.g. context.DeadlineExceeded on a JWKS fetch timeout) and
+errors.As to a nested *IssuerMismatchError through the keyring to discovery
+path, matching the typed-error model the rest of this PR builds.
+- Also trim the trailing slash on both sides of the discovery issuer comparison
+so it no longer depends on the top-of-function normalization, and add a
+reflection test guarding knownASMetadataFields against drift from the struct's
+json tags.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * refactor(oauth): align jwt.go struct tags via gofmt
+- Pre-existing gofmt drift in JWTClaims struct-tag alignment, cleaned up so the
+oauth package is gofmt-clean.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- ---------
+- Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
 ## v0.8.0 (2026-06-29)
 
 
