@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -19,6 +20,16 @@ type AuthorizationServerMetadata struct {
 	ResponseTypesSupported            []string `json:"response_types_supported,omitempty"`
 	GrantTypesSupported               []string `json:"grant_types_supported,omitempty"`
 	TokenEndpointAuthMethodsSupported []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+	// Extra holds any fields beyond the standard set, preserved for forward compatibility.
+	Extra map[string]any `json:"-"`
+}
+
+// knownASMetadataFields are the JSON names mapped to typed fields above; anything else
+// in a discovery response is preserved in AuthorizationServerMetadata.Extra.
+var knownASMetadataFields = []string{
+	"issuer", "authorization_endpoint", "token_endpoint", "jwks_uri",
+	"registration_endpoint", "scopes_supported", "response_types_supported",
+	"grant_types_supported", "token_endpoint_auth_methods_supported",
 }
 
 // DiscoveryOption configures a metadata discovery request.
@@ -67,9 +78,41 @@ func FetchAuthorizationServerMetadata(ctx context.Context, issuer string, opts .
 		}
 	}
 
+	// Read the body once so we can decode the typed fields and also capture any
+	// unknown ones for forward compatibility.
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("reading authorization server metadata: %w", err)
+	}
+
 	var metadata AuthorizationServerMetadata
-	if err := json.NewDecoder(resp.Body).Decode(&metadata); err != nil {
+	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, fmt.Errorf("decoding authorization server metadata: %w", err)
+	}
+
+	// Validate the response issuer matches the requested issuer (RFC 8414 section 3.3),
+	// ignoring a trailing slash.
+	if strings.TrimRight(metadata.Issuer, "/") != issuer {
+		return nil, &IssuerMismatchError{
+			Message: fmt.Sprintf("authorization server issuer %q does not match requested issuer %q", metadata.Issuer, issuer),
+		}
+	}
+
+	// Preserve fields beyond the standard set.
+	var all map[string]json.RawMessage
+	if err := json.Unmarshal(data, &all); err == nil {
+		for _, known := range knownASMetadataFields {
+			delete(all, known)
+		}
+		if len(all) > 0 {
+			metadata.Extra = make(map[string]any, len(all))
+			for k, v := range all {
+				var val any
+				if err := json.Unmarshal(v, &val); err == nil {
+					metadata.Extra[k] = val
+				}
+			}
+		}
 	}
 
 	return &metadata, nil

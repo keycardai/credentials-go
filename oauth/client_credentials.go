@@ -2,7 +2,6 @@ package oauth
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -101,22 +100,8 @@ func (c *ClientCredentialsClient) RequestToken(ctx context.Context, req ClientCr
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		var errBody map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&errBody); err == nil {
-			if errCode, ok := errBody["error"].(string); ok {
-				oauthErr := &OAuthError{
-					ErrorCode: errCode,
-				}
-				if desc, ok := errBody["error_description"].(string); ok {
-					oauthErr.Message = desc
-				} else {
-					oauthErr.Message = errCode
-				}
-				if uri, ok := errBody["error_uri"].(string); ok {
-					oauthErr.ErrorURI = uri
-				}
-				return nil, oauthErr
-			}
+		if oauthErr := parseOAuthErrorResponse(resp); oauthErr != nil {
+			return nil, oauthErr
 		}
 		return nil, fmt.Errorf("client credentials request failed (HTTP %d)", resp.StatusCode)
 	}

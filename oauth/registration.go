@@ -100,18 +100,8 @@ func RegisterClient(ctx context.Context, issuer string, req RegistrationRequest,
 
 	// RFC 7591 §3.2.1 returns 201 Created; some servers return 200.
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		var errBody map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&errBody); err == nil {
-			if errCode, ok := errBody["error"].(string); ok {
-				oauthErr := &OAuthError{ErrorCode: errCode, Message: errCode}
-				if desc, ok := errBody["error_description"].(string); ok {
-					oauthErr.Message = desc
-				}
-				if uri, ok := errBody["error_uri"].(string); ok {
-					oauthErr.ErrorURI = uri
-				}
-				return nil, oauthErr
-			}
+		if oauthErr := parseOAuthErrorResponse(resp); oauthErr != nil {
+			return nil, oauthErr
 		}
 		return nil, &HTTPError{Message: "client registration failed", Status: resp.StatusCode}
 	}

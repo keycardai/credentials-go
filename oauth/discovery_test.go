@@ -10,9 +10,8 @@ import (
 
 func TestFetchAuthorizationServerMetadata(t *testing.T) {
 	metadata := AuthorizationServerMetadata{
-		Issuer:            "https://auth.example.com",
-		TokenEndpoint:     "https://auth.example.com/token",
-		JWKSURI:           "https://auth.example.com/.well-known/jwks.json",
+		TokenEndpoint:         "https://auth.example.com/token",
+		JWKSURI:               "https://auth.example.com/.well-known/jwks.json",
 		AuthorizationEndpoint: "https://auth.example.com/authorize",
 	}
 
@@ -26,6 +25,8 @@ func TestFetchAuthorizationServerMetadata(t *testing.T) {
 		json.NewEncoder(w).Encode(metadata)
 	}))
 	defer server.Close()
+	// A real authorization server reports its own URL as the issuer.
+	metadata.Issuer = server.URL
 
 	result, err := FetchAuthorizationServerMetadata(context.Background(), server.URL)
 	if err != nil {

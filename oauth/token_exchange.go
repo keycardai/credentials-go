@@ -31,6 +31,7 @@ type TokenResponse struct {
 	TokenType       string   `json:"token_type"`
 	ExpiresIn       int      `json:"expires_in,omitempty"`
 	RefreshToken    string   `json:"refresh_token,omitempty"`
+	IDToken         string   `json:"id_token,omitempty"`
 	Scope           []string `json:"scope,omitempty"`
 	IssuedTokenType string   `json:"issued_token_type,omitempty"`
 	UserID          string   `json:"user_id,omitempty"`
@@ -121,22 +122,8 @@ func (c *TokenExchangeClient) ExchangeToken(ctx context.Context, req TokenExchan
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		var errBody map[string]any
-		if err := json.NewDecoder(resp.Body).Decode(&errBody); err == nil {
-			if errCode, ok := errBody["error"].(string); ok {
-				oauthErr := &OAuthError{
-					ErrorCode: errCode,
-				}
-				if desc, ok := errBody["error_description"].(string); ok {
-					oauthErr.Message = desc
-				} else {
-					oauthErr.Message = errCode
-				}
-				if uri, ok := errBody["error_uri"].(string); ok {
-					oauthErr.ErrorURI = uri
-				}
-				return nil, oauthErr
-			}
+		if oauthErr := parseOAuthErrorResponse(resp); oauthErr != nil {
+			return nil, oauthErr
 		}
 		return nil, fmt.Errorf("token exchange failed (HTTP %d)", resp.StatusCode)
 	}
@@ -234,7 +221,7 @@ func deserializeTokenResponse(resp *http.Response) (*TokenResponse, error) {
 
 	tokenType, _ := raw["token_type"].(string)
 	if tokenType == "" {
-		tokenType = "bearer"
+		tokenType = "Bearer"
 	}
 
 	result := &TokenResponse{
@@ -247,6 +234,9 @@ func deserializeTokenResponse(resp *http.Response) (*TokenResponse, error) {
 	}
 	if v, ok := raw["refresh_token"].(string); ok {
 		result.RefreshToken = v
+	}
+	if v, ok := raw["id_token"].(string); ok {
+		result.IDToken = v
 	}
 	if v, ok := raw["issued_token_type"].(string); ok {
 		result.IssuedTokenType = v

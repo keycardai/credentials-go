@@ -38,7 +38,7 @@ func TestJWKSOAuthKeyring_Key(t *testing.T) {
 			json.NewEncoder(w).Encode(jwks)
 		} else if r.URL.Path == "/.well-known/oauth-authorization-server" {
 			metadata := map[string]string{
-				"issuer":   r.URL.Query().Get("issuer"),
+				"issuer":   "http://" + r.Host,
 				"jwks_uri": "http://" + r.Host + "/.well-known/jwks.json",
 			}
 			w.Header().Set("Content-Type", "application/json")
