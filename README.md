@@ -1,8 +1,7 @@
 # Keycard Go SDK
 
-> **Preview.** This SDK has not reached parity with the Keycard Python
-> SDK. APIs may change between minor versions. The preview label will
-> be removed once feature parity is reached.
+> **Preview.** APIs may change between minor versions while this SDK is in
+> preview.
 
 Go SDK for [Keycard](https://keycard.cloud) — OAuth 2.0 and MCP authentication.
 
@@ -17,6 +16,7 @@ Import the sub-package you need:
 ```go
 import "github.com/keycardai/credentials-go/oauth"  // Pure OAuth 2.0 primitives
 import "github.com/keycardai/credentials-go/mcp"    // MCP-specific OAuth integration
+import "github.com/keycardai/credentials-go/a2a"    // Agent-to-agent delegation
 ```
 
 ## Packages
@@ -34,10 +34,16 @@ No MCP dependency. Use standalone for JWT operations, JWKS key discovery, token 
 
 Builds on `oauth` to provide server-side and client-side MCP authentication.
 
-- **Bearer auth middleware** — `RequireBearerAuth` (standard `net/http` middleware)
-- **Token exchange orchestration** — `AuthProvider`, `AccessContext`
-- **Application credentials** — `ClientSecret`, `WebIdentity` (RFC 7523), `EKSWorkloadIdentity`
-- **Metadata endpoints** — `AuthMetadataHandler` (`.well-known` endpoints)
+- **Bearer auth middleware** — `RequireBearerAuth` (standard `net/http` middleware), audience-bound via `oauth.WithAudiences`
+- **Token exchange orchestration** — `AuthProvider`, `AccessContext`; the `Grant` decorator with `WithUserIdentifier` (impersonation) and `WithRequestScopes`
+- **Application credentials** — `ClientSecret`, `WebIdentity` (RFC 7523), `EKSWorkloadIdentity`; multi-zone via `NewMultiZoneClientSecret`
+- **Metadata endpoints** — `AuthMetadataHandler` (`.well-known` endpoints, including `WithPublicJWKS`)
+
+### `a2a` — Agent-to-Agent Delegation
+
+One agent calling another on the user's behalf: discover the target agent's card, exchange the user's token for one scoped to the target (RFC 8693), and invoke its JSON-RPC endpoint.
+
+- **Delegation** — `DelegationClient`, `ServiceDiscovery`
 
 ## Quick Start
 
@@ -68,9 +74,10 @@ mux.Handle("GET /api/hello", protected)
 ### Delegated access via token exchange
 
 ```go
+cred, _ := mcp.NewClientSecret(clientID, clientSecret)
 authProvider, _ := mcp.NewAuthProvider(
     mcp.WithZoneURL("https://your-zone.keycard.cloud"),
-    mcp.WithApplicationCredential(mcp.NewClientSecret(clientID, clientSecret)),
+    mcp.WithApplicationCredential(cred),
 )
 
 verifier, _ := mcp.NewZoneTokenVerifier("https://your-zone.keycard.cloud")
@@ -78,7 +85,7 @@ verifier, _ := mcp.NewZoneTokenVerifier("https://your-zone.keycard.cloud")
 handler := mcp.RequireBearerAuth(
     verifier,
     mcp.WithRequiredScopes("mcp:tools"),
-)(authProvider.Grant("https://api.github.com")(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+)(authProvider.Grant([]string{"https://api.github.com"})(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
     ac := mcp.AccessContextFromRequest(r)
 
     token, err := ac.Access("https://api.github.com")
@@ -95,9 +102,10 @@ handler := mcp.RequireBearerAuth(
 ### Standalone token exchange (without middleware)
 
 ```go
+cred, _ := mcp.NewClientSecret(clientID, clientSecret)
 authProvider, _ := mcp.NewAuthProvider(
     mcp.WithZoneURL("https://your-zone.keycard.cloud"),
-    mcp.WithApplicationCredential(mcp.NewClientSecret(clientID, clientSecret)),
+    mcp.WithApplicationCredential(cred),
 )
 
 ac := authProvider.ExchangeTokens(ctx, userBearerToken, "https://api.github.com")
@@ -113,8 +121,9 @@ token, _ := ac.Access("https://api.github.com")
 
 ```go
 webIdentity := mcp.NewWebIdentity(
+    mcp.WithClientID("your-client-id"), // required: the assertion's iss/sub
     mcp.WithServerName("my-mcp-server"),
-    mcp.WithStorageDir("./keys"),
+    mcp.WithStorageDir("./server_keys"),
 )
 
 authProvider, _ := mcp.NewAuthProvider(
