@@ -1,3 +1,42 @@
+## v0.10.1 (2026-06-30)
+
+
+- fix: advertise path-inserted protected-resource metadata and default authorization_servers (ACC-591) (#21)
+- * fix: advertise path-inserted protected-resource metadata and default authorization_servers
+- RFC 9728 path insertion was not applied on the advertising side: the bearer
+challenge and the Protected Resource Metadata both resolved the resource to the
+bare origin. A server that binds its token audience to a sub-path endpoint
+(e.g. https://host/mcp, the common case) therefore rejected every token, because
+the client requested a token for resource=origin, which never matched.
+- - middleware: protectedResourceMetadataURL appends the request path, so a resource
+  at /mcp advertises .well-known/oauth-protected-resource/mcp.
+- metadata: AuthMetadataHandler also serves the path-inserted PRM route and resolves
+  `resource` to the origin plus the path after the well-known prefix.
+- metadata: emit `authorization_servers: [issuer]` by default. It was omitted unless
+  the request carried MCP-Protocol-Version: 2025-03-26, and then set to the origin
+  instead of the issuer.
+- Fixes ACC-591. Part of ECO-94 (oauth-metadata-endpoints).
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * fix: address review on path-inserted PRM
+- - normalize a trailing slash on the resolved resource so the path-inserted form
+  ".../oauth-protected-resource/" maps to the origin, matching an origin-bound
+  audience exactly (parity with Python's _create_resource_url rstrip)
+- register the path-inserted route as a subtree (".../oauth-protected-resource/")
+  rather than a named-but-unused {resourcePath...} wildcard; the handler derives
+  the resource from r.URL.Path for both routes
+- add tests for the two newly-covered branches: authorization_servers omitted when
+  no issuer is configured, the trailing-slash resource normalization, and the
+  root-path bare challenge
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * fix(mcp): document that an issuer is effectively required for AuthMetadataHandler
+- Without WithIssuer the protected-resource metadata advertises no
+authorization_servers and the authorization-server proxy route is not
+registered, so clients cannot discover the authorization server. Note this on
+the handler. Addresses #21 review.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- ---------
+- Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
 ## v0.10.0 (2026-06-30)
 
 
