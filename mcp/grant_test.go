@@ -99,6 +99,37 @@ func TestGrant_RequestScopes(t *testing.T) {
 	}
 }
 
+func TestGrant_RequestScopesByResource(t *testing.T) {
+	zone := newGrantTokenServer(t)
+	provider := newSingleZoneProvider(t, zone.URL)
+
+	ac := runGrant(t, zone.URL, "user-token",
+		provider.Grant(
+			[]string{"https://a.example.com", "https://b.example.com"},
+			WithRequestScopes("default.scope"), // fallback for resources not in the map
+			WithRequestScopesByResource(map[string][]string{
+				"https://a.example.com": {"a.read", "a.write"},
+			}),
+		))
+
+	if ac.Status() != StatusSuccess {
+		t.Fatalf("status: got %q, want success", ac.Status())
+	}
+
+	byResource := map[string]string{}
+	for _, f := range zone.tokenForms() {
+		if f.Get("grant_type") == "urn:ietf:params:oauth:grant-type:token-exchange" {
+			byResource[f.Get("resource")] = f.Get("scope")
+		}
+	}
+	if got := byResource["https://a.example.com"]; got != "a.read a.write" {
+		t.Errorf("resource a scope: got %q, want %q (per-resource)", got, "a.read a.write")
+	}
+	if got := byResource["https://b.example.com"]; got != "default.scope" {
+		t.Errorf("resource b scope: got %q, want %q (falls back to flat)", got, "default.scope")
+	}
+}
+
 func TestGrant_UserIdentifierImpersonates(t *testing.T) {
 	zone := newGrantTokenServer(t)
 	provider := newSingleZoneProvider(t, zone.URL)

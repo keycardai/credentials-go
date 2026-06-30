@@ -127,8 +127,9 @@ func NewAuthProvider(opts ...AuthProviderOption) (*AuthProvider, error) {
 type GrantOption func(*grantConfig)
 
 type grantConfig struct {
-	userIdentifier func(*http.Request) (string, error)
-	requestScopes  []string
+	userIdentifier          func(*http.Request) (string, error)
+	requestScopes           []string
+	requestScopesByResource map[string][]string
 }
 
 // WithUserIdentifier sets a resolver that maps the inbound request to a user identifier.
@@ -149,10 +150,17 @@ func WithUserIdentifier(fn func(*http.Request) (string, error)) GrantOption {
 
 // WithRequestScopes sets the scopes requested for each resource's exchanged token. The
 // same scopes apply to every resource in the grant and take precedence over any scope the
-// application credential sets. To request different scopes per resource, stack a
-// single-resource Grant for each.
+// application credential sets. Use WithRequestScopesByResource to vary scopes per resource.
 func WithRequestScopes(scopes ...string) GrantOption {
 	return func(c *grantConfig) { c.requestScopes = scopes }
+}
+
+// WithRequestScopesByResource sets the scopes requested per resource, keyed by resource
+// URL. A resource present in the map uses its scopes; a resource absent from the map falls
+// back to WithRequestScopes (if set). This mirrors the per-resource form of the TypeScript
+// requestScopes option.
+func WithRequestScopesByResource(scopes map[string][]string) GrantOption {
+	return func(c *grantConfig) { c.requestScopesByResource = scopes }
 }
 
 // Grant returns middleware that performs token exchange for the specified resources and
@@ -192,7 +200,7 @@ func (p *AuthProvider) Grant(resources []string, opts ...GrantOption) func(http.
 				userIdentifier = id
 			}
 
-			ac := p.exchange(r.Context(), authInfo.Issuer, authInfo.Token, userIdentifier, cfg.requestScopes, resources)
+			ac := p.exchange(r.Context(), authInfo.Issuer, authInfo.Token, userIdentifier, cfg.requestScopes, cfg.requestScopesByResource, resources)
 			next.ServeHTTP(w, r.WithContext(mergeAccessContext(r, ac)))
 		})
 	}
@@ -212,16 +220,16 @@ func mergeAccessContext(r *http.Request, ac *oauth.AccessContext) context.Contex
 // AccessContext. For a multi-zone provider use ExchangeTokensForZone, or Grant (which
 // routes by the verified token's issuer).
 func (p *AuthProvider) ExchangeTokens(ctx context.Context, subjectToken string, resources ...string) *AccessContext {
-	return p.exchange(ctx, "", subjectToken, "", nil, resources)
+	return p.exchange(ctx, "", subjectToken, "", nil, nil, resources)
 }
 
 // ExchangeTokensForZone performs token exchange against the given zone (issuer URL),
 // selecting that zone's credential. It fails closed if the zone is not configured.
 func (p *AuthProvider) ExchangeTokensForZone(ctx context.Context, issuer, subjectToken string, resources ...string) *AccessContext {
-	return p.exchange(ctx, issuer, subjectToken, "", nil, resources)
+	return p.exchange(ctx, issuer, subjectToken, "", nil, nil, resources)
 }
 
-func (p *AuthProvider) exchange(ctx context.Context, issuer, subjectToken, userIdentifier string, scopes, resources []string) *AccessContext {
+func (p *AuthProvider) exchange(ctx context.Context, issuer, subjectToken, userIdentifier string, scopes []string, scopesByResource map[string][]string, resources []string) *AccessContext {
 	ac := oauth.NewAccessContext()
 
 	zone, err := p.resolveZone(issuer)
@@ -247,7 +255,11 @@ func (p *AuthProvider) exchange(ctx context.Context, issuer, subjectToken, userI
 
 	tokens := make(map[string]*oauth.TokenResponse)
 	for _, resource := range resources {
-		resp, err := p.exchangeResource(ctx, client, subjectToken, userIdentifier, scopes, resource, tokenEndpoint)
+		resourceScopes := scopes
+		if s, ok := scopesByResource[resource]; ok {
+			resourceScopes = s
+		}
+		resp, err := p.exchangeResource(ctx, client, subjectToken, userIdentifier, resourceScopes, resource, tokenEndpoint)
 		if err != nil {
 			ac.SetResourceError(resource, exchangeErrorDetail(resource, err))
 			continue
