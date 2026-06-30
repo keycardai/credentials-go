@@ -1,3 +1,36 @@
+## v0.11.0 (2026-06-30)
+
+
+- feat(mcp)!: validate application credential construction and type EKS runtime errors (ECO-94) (#23)
+- * feat(mcp)!: validate application credential construction and type EKS runtime errors (ECO-94)
+- NewClientSecret and NewMultiZoneClientSecret now return an error and reject
+an empty client_id, client_secret, an empty zone map, or a zone entry missing
+its issuer or credentials. They surface ClientSecretConfigurationError instead
+of building a credential that fails opaquely during token exchange.
+- EKSWorkloadIdentityCredential.PrepareTokenExchangeRequest returns the new
+EKSWorkloadIdentityRuntimeError when the token file cannot be read or is empty
+at request time, distinct from the construction-time
+EKSWorkloadIdentityConfigurationError (e.g. the file is rotated away after the
+credential is built).
+- BREAKING CHANGE: NewClientSecret and NewMultiZoneClientSecret now return
+(*ClientSecretCredential, error). Callers must handle the returned error.
+- WebIdentity construction tightening (client_id + token_endpoint requirement,
+storage-dir default change, audience_config) is left to a follow-up.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- * fix(mcp): preserve the read cause in EKS workload-identity errors
+- EKSWorkloadIdentityRuntimeError and EKSWorkloadIdentityConfigurationError now
+carry an Err field and Unwrap(), storing the os.ReadFile cause instead of
+formatting it away with %v. This restores errors.Is(err, os.ErrNotExist) and
+errors.Is(err, os.ErrPermission) on a failed token read, which distinguishes a
+missing/unmounted token path from a mounted-but-unreadable one. Matches the
+Err/Unwrap() convention adopted in the oauth and a2a error types.
+- Also document that NewClientSecret uses its inputs verbatim, and assert the
+config-vs-runtime error split (and the unwrapped os.ErrNotExist) in the tests.
+- Addresses the #23 review.
+- Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+- ---------
+- Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
 ## v0.10.1 (2026-06-30)
 
 
